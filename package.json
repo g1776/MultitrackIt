@@ -1,0 +1,46 @@
+{
+  "name": "multitrackit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop app for solo performers to record and layer multi-part arrangements.",
+  "main": "dist-electron/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "vite",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build": "npm run build:renderer && npm run build:electron",
+    "electron": "electron .",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p electron/tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.5"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "build": {
+    "appId": "com.multitrackit.app",
+    "productName": "MultitrackIt",
+    "files": [
+      "dist/**",
+      "dist-electron/**"
+    ],
+    "directories": {
+      "output": "release"
+    }
+  }
+}
