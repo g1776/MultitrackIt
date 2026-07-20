@@ -192,11 +192,43 @@ describe("RecordingEngine", () => {
       await engine.stopRecording();
       const take = engine.getActiveProject()!.tracks[0].takes[0];
 
-      engine.setTakeOffset(take.id, 250);
+      await engine.setTakeOffset(take.id, 250);
       await engine.play();
 
       expect(playback.playedSchedules[0].entries[0].startAtMs).toBe(250);
       void trackId;
+    });
+
+    it("restarts composite playback with a recomputed schedule when a Take's Offset changes while playing", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      const trackId = engine.getActiveProject()!.tracks[0].id;
+      await engine.stopRecording();
+      const take = engine.getActiveProject()!.tracks[0].takes[0];
+
+      await engine.play();
+      expect(playback.playedSchedules).toHaveLength(1);
+      expect(playback.stoppedHandles).toHaveLength(0);
+
+      await engine.setTakeOffset(take.id, 250);
+
+      expect(playback.stoppedHandles).toHaveLength(1);
+      expect(playback.playedSchedules).toHaveLength(2);
+      expect(playback.playedSchedules[1].entries[0].startAtMs).toBe(250);
+      expect(engine.getStatus()).toBe("playing");
+      void trackId;
+    });
+
+    it("does not restart playback when a Take's Offset changes while not playing", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      await engine.stopRecording();
+      const take = engine.getActiveProject()!.tracks[0].takes[0];
+
+      await engine.setTakeOffset(take.id, 250);
+
+      expect(playback.playedSchedules).toHaveLength(0);
+      expect(playback.stoppedHandles).toHaveLength(0);
     });
   });
 
@@ -207,7 +239,7 @@ describe("RecordingEngine", () => {
       const firstTrackId = engine.getActiveProject()!.tracks[0].id;
       await engine.stopRecording();
       const firstTake = engine.getActiveProject()!.tracks[0].takes[0];
-      engine.setTakeOffset(firstTake.id, 150);
+      await engine.setTakeOffset(firstTake.id, 150);
 
       await engine.recordTake(undefined);
 

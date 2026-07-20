@@ -117,9 +117,23 @@ export class RecordingEngine {
     track.selectedTakeId = takeId;
   }
 
-  setTakeOffset(takeId: TakeId, offsetMs: number): void {
+  /**
+   * Updates a Take's Offset. Unlike mute/solo (a live volume-only update via
+   * `updateMix`), an Offset change alters *when* a Take starts, which the
+   * PlaybackAdapter seam has no way to apply to an already-playing entry —
+   * so if composite playback is in progress, it's restarted with a freshly
+   * computed schedule to bring the new Offset into effect immediately.
+   */
+  async setTakeOffset(takeId: TakeId, offsetMs: number): Promise<void> {
     const take = this.findTake(takeId);
     take.offsetMs = offsetMs;
+
+    if (this.status === "playing" && this.activePlaybackHandle) {
+      const project = this.requireProject();
+      await this.playback.stop(this.activePlaybackHandle);
+      const schedule = buildCompositeSchedule(project.tracks, this.monitorMix);
+      this.activePlaybackHandle = await this.playback.play(schedule);
+    }
   }
 
   setTrackMuteSolo(trackId: TrackId, changes: { mute?: boolean; solo?: boolean }): void {

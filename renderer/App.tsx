@@ -107,6 +107,40 @@ function MonitorMixVolumeSlider({
   );
 }
 
+function TakeOffsetInput({
+  offsetMs,
+  onChange,
+}: {
+  offsetMs: number;
+  onChange: (offsetMs: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(offsetMs));
+
+  useEffect(() => setDraft(String(offsetMs)), [offsetMs]);
+
+  function commit() {
+    const parsed = Number(draft);
+    if (Number.isFinite(parsed) && parsed !== offsetMs) onChange(parsed);
+    else setDraft(String(offsetMs));
+  }
+
+  return (
+    <label style={{ marginLeft: 8 }}>
+      Offset (ms):{" "}
+      <input
+        type="number"
+        step={1}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        aria-label="Take Offset in milliseconds"
+        style={{ width: 80 }}
+      />
+    </label>
+  );
+}
+
 export function App() {
   const engine = useMemo(
     () => new RecordingEngine(new BrowserCaptureAdapter(), new BrowserPlaybackAdapter()),
@@ -213,6 +247,16 @@ export function App() {
     setError(null);
     try {
       engine.setTrackMuteSolo(trackId, changes);
+      refreshProject();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function handleSetTakeOffset(takeId: string, offsetMs: number) {
+    setError(null);
+    try {
+      await engine.setTakeOffset(takeId, offsetMs);
       refreshProject();
     } catch (e) {
       setError((e as Error).message);
@@ -342,6 +386,12 @@ export function App() {
                       </option>
                     ))}
                   </select>
+                )}
+                {t.selectedTakeId && (
+                  <TakeOffsetInput
+                    offsetMs={t.takes.find((take) => take.id === t.selectedTakeId)!.offsetMs}
+                    onChange={(offsetMs) => handleSetTakeOffset(t.selectedTakeId!, offsetMs)}
+                  />
                 )}
                 <button
                   onClick={() => handleRecordToggle(t.id)}
