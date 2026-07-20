@@ -33,6 +33,19 @@ export interface PlaybackScheduleEntry {
 export interface PlaybackAdapter {
   play(schedule: PlaybackSchedule): Promise<PlaybackHandle>;
   stop(handle: PlaybackHandle): Promise<void>;
+  /**
+   * Applies new volume/muted values to Takes already playing under `handle`,
+   * without restarting or re-syncing playback. Used so mute/solo takes
+   * effect immediately on in-progress composite playback rather than only
+   * on the next `play()`.
+   */
+  updateMix(handle: PlaybackHandle, updates: PlaybackMixUpdate[]): void;
+}
+
+export interface PlaybackMixUpdate {
+  takeId: TakeId;
+  volume: number;
+  muted: boolean;
 }
 
 export interface PlaybackHandle {

@@ -1,6 +1,6 @@
 import type { CaptureAdapter, CaptureHandle, PlaybackAdapter, PlaybackHandle } from "./adapters";
 import type { EngineStatus, Guide, Project, Take, TakeId, Track, TrackId } from "./types";
-import { buildCompositeSchedule, buildMonitorMixSchedule } from "./scheduling";
+import { buildCompositeSchedule, buildMixUpdates, buildMonitorMixSchedule } from "./scheduling";
 
 let idCounter = 0;
 function nextId(prefix: string): string {
@@ -126,6 +126,14 @@ export class RecordingEngine {
     const track = this.requireTrack(trackId);
     if (changes.mute !== undefined) track.mute = changes.mute;
     if (changes.solo !== undefined) track.solo = changes.solo;
+
+    if (this.status === "playing" && this.activePlaybackHandle) {
+      const project = this.requireProject();
+      this.playback.updateMix(
+        this.activePlaybackHandle,
+        buildMixUpdates(project.tracks, this.monitorMix)
+      );
+    }
   }
 
   setMonitorMixLevel(targetId: TrackId | "guide", level: number): void {

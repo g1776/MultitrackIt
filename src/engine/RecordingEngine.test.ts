@@ -132,7 +132,7 @@ describe("RecordingEngine", () => {
       void trackId;
     });
 
-    it("excludes muted Tracks and Tracks with no selected Take from the schedule", async () => {
+    it("marks muted Tracks as muted entries and excludes Tracks with no selected Take from the schedule", async () => {
       engine.createProject("My Song");
       await engine.recordTake(undefined);
       const track1Id = engine.getActiveProject()!.tracks[0].id;
@@ -144,12 +144,45 @@ describe("RecordingEngine", () => {
       engine.setTrackMuteSolo(track2Id, { mute: true, solo: false });
       await engine.play();
 
-      const schedule = playback.playedSchedules[0];
-      expect(schedule.entries).toHaveLength(1);
+      const schedule = playback.playedSchedules[playback.playedSchedules.length - 1];
+      expect(schedule.entries).toHaveLength(2);
       expect(schedule.entries[0].takeId).toBe(
         engine.getActiveProject()!.tracks[0].takes[0].id
       );
+      expect(schedule.entries[0].muted).toBe(false);
+      expect(schedule.entries[1].takeId).toBe(
+        engine.getActiveProject()!.tracks[1].takes[0].id
+      );
+      expect(schedule.entries[1].muted).toBe(true);
       void track1Id;
+    });
+
+    it("pushes a live mix update to the playback adapter when mute/solo changes while already playing", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      const trackId = engine.getActiveProject()!.tracks[0].id;
+      await engine.stopRecording();
+      const takeId = engine.getActiveProject()!.tracks[0].takes[0].id;
+
+      await engine.play();
+      expect(playback.mixUpdates).toHaveLength(0);
+
+      engine.setTrackMuteSolo(trackId, { mute: true });
+
+      expect(playback.mixUpdates).toHaveLength(1);
+      const { updates } = playback.mixUpdates[0];
+      expect(updates).toEqual([{ takeId, volume: 1, muted: true }]);
+    });
+
+    it("does not push a mix update when mute/solo changes while not playing", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      const trackId = engine.getActiveProject()!.tracks[0].id;
+      await engine.stopRecording();
+
+      engine.setTrackMuteSolo(trackId, { mute: true });
+
+      expect(playback.mixUpdates).toHaveLength(0);
     });
 
     it("applies each Take's Offset as the schedule's startAtMs", async () => {

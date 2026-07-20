@@ -1,4 +1,4 @@
-import type { PlaybackSchedule, PlaybackScheduleEntry } from "./adapters";
+import type { PlaybackMixUpdate, PlaybackSchedule, PlaybackScheduleEntry } from "./adapters";
 import type { Guide, Track, TrackId } from "./types";
 
 /**
@@ -70,6 +70,12 @@ function scheduleInputsForTracks(
   });
 }
 
+/** Whether a Track should be heard, honoring solo (exclusive when any Track is soloed) and mute. */
+function isTrackAudible(tracks: Track[], track: Track): boolean {
+  const anySoloed = tracks.some((t) => t.solo);
+  return anySoloed ? track.solo : !track.mute;
+}
+
 /**
  * Monitor Mix schedule played while recording a new Take: the selected
  * Takes of previously recorded Tracks, offset-corrected and sync'd, at
@@ -102,14 +108,49 @@ export function buildMonitorMixSchedule(
 }
 
 /**
- * Composite playback schedule: all audible Tracks' selected Takes together,
- * offset-corrected and sync'd, at the given per-Track volume levels.
+ * Composite playback schedule: every Track with a selected Take, offset-
+ * corrected and sync'd, at the given per-Track volume levels. Tracks that
+ * aren't currently audible (per mute/solo) are included as muted entries
+ * rather than omitted, so a schedule built once still has every Take's
+ * element in sync and ready — toggling mute/solo later only needs to flip
+ * `muted`/`volume` on an already-playing entry via `buildMixUpdates`,
+ * instead of restarting or re-syncing playback.
  */
 export function buildCompositeSchedule(
   tracks: Track[],
   levels: Map<TrackId, number>
 ): PlaybackSchedule {
-  return computePlaybackSchedule(scheduleInputsForTracks(tracks, levels));
+  const inputs: ScheduleInput[] = tracks
+    .filter((track) => track.selectedTakeId)
+    .map((track) => {
+      const take = track.takes.find((t) => t.id === track.selectedTakeId)!;
+      return {
+        takeId: take.id,
+        mediaRef: take.mediaRef,
+        offsetMs: take.offsetMs,
+        volume: levels.get(track.id) ?? 1,
+        muted: !isTrackAudible(tracks, track),
+      };
+    });
+  return computePlaybackSchedule(inputs);
+}
+
+/**
+ * Per-Take volume/muted values for all Tracks with a selected Take,
+ * reflecting current mute/solo and Monitor Mix levels — the live update to
+ * push to an already-playing composite schedule via `PlaybackAdapter.updateMix`.
+ */
+export function buildMixUpdates(
+  tracks: Track[],
+  levels: Map<TrackId, number>
+): PlaybackMixUpdate[] {
+  return tracks
+    .filter((track) => track.selectedTakeId)
+    .map((track) => ({
+      takeId: track.selectedTakeId!,
+      volume: levels.get(track.id) ?? 1,
+      muted: !isTrackAudible(tracks, track),
+    }));
 }
 
 /** One Track's position within a simple static video grid Layout. */

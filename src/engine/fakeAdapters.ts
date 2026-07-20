@@ -3,6 +3,7 @@ import type {
   CaptureHandle,
   PlaybackAdapter,
   PlaybackHandle,
+  PlaybackMixUpdate,
   PlaybackSchedule,
 } from "./adapters";
 
@@ -30,6 +31,7 @@ export class FakePlaybackAdapter implements PlaybackAdapter {
   private nextId = 1;
   public playedSchedules: PlaybackSchedule[] = [];
   public stoppedHandles: PlaybackHandle[] = [];
+  public mixUpdates: { handle: PlaybackHandle; updates: PlaybackMixUpdate[] }[] = [];
 
   async play(schedule: PlaybackSchedule): Promise<PlaybackHandle> {
     this.playedSchedules.push(schedule);
@@ -38,5 +40,9 @@ export class FakePlaybackAdapter implements PlaybackAdapter {
 
   async stop(handle: PlaybackHandle): Promise<void> {
     this.stoppedHandles.push(handle);
+  }
+
+  updateMix(handle: PlaybackHandle, updates: PlaybackMixUpdate[]): void {
+    this.mixUpdates.push({ handle, updates });
   }
 }

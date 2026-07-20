@@ -4,6 +4,7 @@ import {
   selectAudibleTracks,
   buildMonitorMixSchedule,
   buildCompositeSchedule,
+  buildMixUpdates,
   computeGridLayout,
 } from "./scheduling";
 import type { Guide, Track } from "./types";
@@ -216,6 +217,54 @@ describe("buildCompositeSchedule", () => {
 
   it("returns an empty schedule for an empty Track list", () => {
     expect(buildCompositeSchedule([], new Map())).toEqual({ entries: [] });
+  });
+
+  it("includes muted/non-soloed Tracks as muted entries rather than omitting them, so playback stays in sync when mute/solo changes later", () => {
+    const trackA = makeTrack({
+      id: "a",
+      takes: [take("take-a", "a", 0)],
+      selectedTakeId: "take-a",
+      mute: true,
+    });
+    const trackB = makeTrack({
+      id: "b",
+      takes: [take("take-b", "b", 0)],
+      selectedTakeId: "take-b",
+      solo: true,
+    });
+    const trackC = makeTrack({
+      id: "c",
+      takes: [take("take-c", "c", 0)],
+      selectedTakeId: "take-c",
+    });
+    const schedule = buildCompositeSchedule([trackA, trackB, trackC], new Map());
+    expect(schedule.entries.map((e) => ({ takeId: e.takeId, muted: e.muted }))).toEqual([
+      { takeId: "take-a", muted: true },
+      { takeId: "take-b", muted: false },
+      { takeId: "take-c", muted: true },
+    ]);
+  });
+});
+
+describe("buildMixUpdates", () => {
+  it("computes muted/volume per Track honoring solo exclusivity and mute", () => {
+    const trackA = makeTrack({ id: "a", selectedTakeId: "take-a", mute: true });
+    const trackB = makeTrack({ id: "b", selectedTakeId: "take-b", solo: true });
+    const trackC = makeTrack({ id: "c", selectedTakeId: "take-c" });
+    const updates = buildMixUpdates(
+      [trackA, trackB, trackC],
+      new Map([["b", 0.5]])
+    );
+    expect(updates).toEqual([
+      { takeId: "take-a", volume: 1, muted: true },
+      { takeId: "take-b", volume: 0.5, muted: false },
+      { takeId: "take-c", volume: 1, muted: true },
+    ]);
+  });
+
+  it("skips Tracks with no selected Take", () => {
+    const track = makeTrack({ id: "a", selectedTakeId: null });
+    expect(buildMixUpdates([track], new Map())).toEqual([]);
   });
 });
 

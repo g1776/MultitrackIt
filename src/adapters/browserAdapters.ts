@@ -3,6 +3,7 @@ import type {
   CaptureHandle,
   PlaybackAdapter,
   PlaybackHandle,
+  PlaybackMixUpdate,
   PlaybackSchedule,
 } from "../engine/adapters";
 
@@ -67,6 +68,7 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
 
 interface ActivePlayback extends PlaybackHandle {
   elements: HTMLVideoElement[];
+  elementsByTakeId: Map<string, HTMLVideoElement>;
   timers: ReturnType<typeof setTimeout>[];
 }
 
@@ -82,6 +84,7 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
   async play(schedule: PlaybackSchedule): Promise<PlaybackHandle> {
     const id = `playback-${this.nextId++}`;
     const elements: HTMLVideoElement[] = [];
+    const elementsByTakeId = new Map<string, HTMLVideoElement>();
     const timers: ReturnType<typeof setTimeout>[] = [];
 
     for (const entry of schedule.entries) {
@@ -89,6 +92,7 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
       video.src = entry.mediaRef;
       video.volume = entry.muted ? 0 : entry.volume;
       elements.push(video);
+      elementsByTakeId.set(entry.takeId, video);
 
       const delay = Math.max(0, entry.startAtMs);
       timers.push(
@@ -99,7 +103,7 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
       );
     }
 
-    const handle: ActivePlayback = { id, elements, timers };
+    const handle: ActivePlayback = { id, elements, elementsByTakeId, timers };
     this.active.set(handle.id, handle);
     return { id: handle.id };
   }
@@ -114,5 +118,14 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
       el.load();
     });
     this.active.delete(handle.id);
+  }
+
+  updateMix(handle: PlaybackHandle, updates: PlaybackMixUpdate[]): void {
+    const active = this.active.get(handle.id);
+    if (!active) return;
+    for (const update of updates) {
+      const el = active.elementsByTakeId.get(update.takeId);
+      if (el) el.volume = update.muted ? 0 : update.volume;
+    }
   }
 }
