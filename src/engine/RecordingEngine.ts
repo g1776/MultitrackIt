@@ -1,5 +1,6 @@
 import type { CaptureAdapter, CaptureHandle, PlaybackAdapter, PlaybackHandle } from "./adapters";
 import type { EngineStatus, Project, Take, TakeId, Track, TrackId } from "./types";
+import { buildCompositeSchedule, buildMonitorMixSchedule } from "./scheduling";
 
 let idCounter = 0;
 function nextId(prefix: string): string {
@@ -19,6 +20,7 @@ export class RecordingEngine {
   private activeCaptureHandle: CaptureHandle | null = null;
   private activeCaptureTrackId: TrackId | null = null;
   private activePlaybackHandle: PlaybackHandle | null = null;
+  private activeMonitorPlaybackHandle: PlaybackHandle | null = null;
 
   constructor(
     private readonly capture: CaptureAdapter,
@@ -49,6 +51,15 @@ export class RecordingEngine {
 
     this.activeCaptureTrackId = track.id;
     this.activeCaptureHandle = await this.capture.startCapture();
+
+    // Monitor Mix: play back previously recorded Tracks' selected Takes,
+    // offset-corrected and in sync, so the performer can record against
+    // them. The Track being recorded onto is excluded.
+    const monitorSchedule = buildMonitorMixSchedule(project.tracks, this.monitorMix, track.id);
+    if (monitorSchedule.entries.length > 0) {
+      this.activeMonitorPlaybackHandle = await this.playback.play(monitorSchedule);
+    }
+
     this.status = "recording";
   }
 
@@ -58,6 +69,11 @@ export class RecordingEngine {
     }
     const trackId = this.activeCaptureTrackId;
     const mediaRef = await this.capture.stopCapture(this.activeCaptureHandle);
+
+    if (this.activeMonitorPlaybackHandle) {
+      await this.playback.stop(this.activeMonitorPlaybackHandle);
+      this.activeMonitorPlaybackHandle = null;
+    }
 
     const track = this.requireTrack(trackId);
     const take: Take = {
@@ -107,23 +123,9 @@ export class RecordingEngine {
       throw new Error(`Cannot start playback while ${this.status}`);
     }
     const project = this.requireProject();
-    const soloedTracks = project.tracks.filter((t) => t.solo);
-    const audibleTracks = soloedTracks.length > 0 ? soloedTracks : project.tracks;
+    const schedule = buildCompositeSchedule(project.tracks, this.monitorMix);
 
-    const entries = audibleTracks
-      .filter((track) => !track.mute && track.selectedTakeId)
-      .map((track) => {
-        const take = track.takes.find((t) => t.id === track.selectedTakeId)!;
-        return {
-          takeId: take.id,
-          mediaRef: take.mediaRef,
-          startAtMs: take.offsetMs,
-          volume: this.monitorMix.get(track.id) ?? 1,
-          muted: false,
-        };
-      });
-
-    this.activePlaybackHandle = await this.playback.play({ entries });
+    this.activePlaybackHandle = await this.playback.play(schedule);
     this.status = "playing";
   }
 

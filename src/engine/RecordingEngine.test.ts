@@ -150,6 +150,56 @@ describe("RecordingEngine", () => {
     });
   });
 
+  describe("Monitor Mix during recording", () => {
+    it("plays back previously recorded Tracks, offset-corrected, when recording a new Take on a different Track", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      const firstTrackId = engine.getActiveProject()!.tracks[0].id;
+      await engine.stopRecording();
+      const firstTake = engine.getActiveProject()!.tracks[0].takes[0];
+      engine.setTakeOffset(firstTake.id, 150);
+
+      await engine.recordTake(undefined);
+
+      expect(playback.playedSchedules).toHaveLength(1);
+      const monitorSchedule = playback.playedSchedules[0];
+      expect(monitorSchedule.entries).toHaveLength(1);
+      expect(monitorSchedule.entries[0].takeId).toBe(firstTake.id);
+      expect(monitorSchedule.entries[0].startAtMs).toBe(150);
+      void firstTrackId;
+    });
+
+    it("does not start Monitor Mix playback when recording the very first Take", async () => {
+      engine.createProject("My Song");
+
+      await engine.recordTake(undefined);
+
+      expect(playback.playedSchedules).toHaveLength(0);
+    });
+
+    it("excludes the Track currently being recorded onto from the Monitor Mix", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      const trackId = engine.getActiveProject()!.tracks[0].id;
+      await engine.stopRecording();
+
+      await engine.recordTake(trackId);
+
+      expect(playback.playedSchedules).toHaveLength(0);
+    });
+
+    it("stops Monitor Mix playback when recording stops", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      await engine.stopRecording();
+
+      await engine.recordTake(undefined);
+      await engine.stopRecording();
+
+      expect(playback.stoppedHandles).toHaveLength(1);
+    });
+  });
+
   describe("stop", () => {
     it("stops playback and returns to idle", async () => {
       engine.createProject("My Song");

@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { RecordingEngine } from "../src/engine/RecordingEngine";
 import { BrowserCaptureAdapter, BrowserPlaybackAdapter } from "../src/adapters/browserAdapters";
-import type { Project } from "../src/engine/types";
+import { computeGridLayout } from "../src/engine/scheduling";
+import type { Project, Track } from "../src/engine/types";
+
+function selectedTakeMediaRef(track: Track): string | undefined {
+  return track.takes.find((t) => t.id === track.selectedTakeId)?.mediaRef;
+}
 
 export function App() {
   const engine = useMemo(
@@ -63,10 +68,12 @@ export function App() {
     }
   }
 
-  const track = project?.tracks[0];
+  const tracks = project?.tracks ?? [];
+  const hasAnyRecordedTake = tracks.some((t) => t.selectedTakeId);
+  const gridLayout = useMemo(() => computeGridLayout(tracks), [tracks]);
 
   return (
-    <main style={{ fontFamily: "sans-serif", padding: 24, maxWidth: 480 }}>
+    <main style={{ fontFamily: "sans-serif", padding: 24, maxWidth: 720 }}>
       <h1>MultitrackIt</h1>
 
       {!project && (
@@ -86,15 +93,70 @@ export function App() {
           <button onClick={handleRecordToggle}>
             {isRecording ? "Stop Recording" : "Record"}
           </button>
-          {track?.selectedTakeId && (
+          {hasAnyRecordedTake && (
             <button onClick={handlePlayToggle} disabled={isRecording}>
-              {isPlaying ? "Stop" : "Play"}
+              {isPlaying ? "Stop" : "Play All Tracks"}
             </button>
           )}
-          {track && (
-            <p>
-              {track.name}: {track.takes.length} take(s)
-            </p>
+
+          {isRecording && tracks.length > 1 && (
+            <p>Monitoring {tracks.length - 1} previously recorded Track(s) in sync while you record.</p>
+          )}
+
+          <ul>
+            {tracks.map((t) => (
+              <li key={t.id}>
+                {t.name}: {t.takes.length} take(s)
+                {t.mute ? " (muted)" : ""}
+                {t.solo ? " (solo)" : ""}
+              </li>
+            ))}
+          </ul>
+
+          {/*
+            Composite video grid: one cell per visible Track, laid out via
+            the pure computeGridLayout. Video is rendered muted here since
+            audio for composite/monitor playback is driven separately by the
+            engine's playback adapter (offset-corrected, sync'd); this grid
+            is the visual counterpart of that same schedule.
+          */}
+          {gridLayout.length > 0 && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${gridLayout[0].cols}, 1fr)`,
+                gridTemplateRows: `repeat(${gridLayout[0].rows}, 1fr)`,
+                gap: 8,
+                marginTop: 16,
+              }}
+            >
+              {gridLayout.map((cell) => {
+                const cellTrack = tracks.find((t) => t.id === cell.trackId)!;
+                const mediaRef = selectedTakeMediaRef(cellTrack);
+                return (
+                  <div
+                    key={cell.trackId}
+                    style={{
+                      gridRow: cell.row + 1,
+                      gridColumn: cell.col + 1,
+                      background: "#000",
+                      aspectRatio: "16 / 9",
+                    }}
+                  >
+                    {mediaRef && (
+                      // eslint-disable-next-line jsx-a11y/media-has-caption
+                      <video
+                        src={mediaRef}
+                        muted
+                        playsInline
+                        autoPlay={isPlaying}
+                        style={{ width: "100%", height: "100%" }}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </section>
       )}
