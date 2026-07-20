@@ -6,6 +6,7 @@ import {
   buildCompositeSchedule,
   buildMixUpdates,
   computeGridLayout,
+  computeGridDimensions,
 } from "./scheduling";
 import type { Guide, Track } from "./types";
 
@@ -344,5 +345,19 @@ describe("computeGridLayout", () => {
       { trackId: "a", startAtMs: 0 },
       { trackId: "b", startAtMs: 300 },
     ]);
+  });
+});
+
+describe("computeGridDimensions", () => {
+  it("returns zero rows/cols for zero cells", () => {
+    expect(computeGridDimensions(0)).toEqual({ rows: 0, cols: 0 });
+  });
+
+  it("arranges cells into a near-square grid, matching computeGridLayout's own dimensions", () => {
+    expect(computeGridDimensions(1)).toEqual({ rows: 1, cols: 1 });
+    expect(computeGridDimensions(2)).toEqual({ rows: 1, cols: 2 });
+    expect(computeGridDimensions(3)).toEqual({ rows: 2, cols: 2 });
+    expect(computeGridDimensions(4)).toEqual({ rows: 2, cols: 2 });
+    expect(computeGridDimensions(5)).toEqual({ rows: 2, cols: 3 });
   });
 });

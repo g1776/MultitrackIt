@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RecordingEngine } from "../src/engine/RecordingEngine";
 import { BrowserCaptureAdapter, BrowserPlaybackAdapter } from "../src/adapters/browserAdapters";
-import { computeGridLayout } from "../src/engine/scheduling";
+import { computeGridDimensions, computeGridLayout } from "../src/engine/scheduling";
 import type { Project, Track } from "../src/engine/types";
 import { generateMetronomeGuideAudio } from "../src/adapters/metronomeAudio";
 import { ElectronProjectStorageAdapter } from "../src/adapters/electronStorageAdapter";
@@ -146,9 +146,14 @@ function TakeOffsetInput({
 }
 
 export function App() {
+  // Held separately (not just inside the engine) so the renderer can read
+  // the in-progress capture's live MediaStream for a real-time preview —
+  // the engine's CaptureAdapter seam has no reason to expose that, since it
+  // only ever deals in the finished mediaRef stopCapture() returns.
+  const captureAdapter = useMemo(() => new BrowserCaptureAdapter(), []);
   const engine = useMemo(
-    () => new RecordingEngine(new BrowserCaptureAdapter(), new BrowserPlaybackAdapter()),
-    []
+    () => new RecordingEngine(captureAdapter, new BrowserPlaybackAdapter()),
+    [captureAdapter]
   );
   const storage: ProjectStorageAdapter = useMemo(() => new ElectronProjectStorageAdapter(), []);
 
@@ -158,6 +163,7 @@ export function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recordingTrackId, setRecordingTrackId] = useState<string | undefined>(undefined);
+  const [livePreviewTrackId, setLivePreviewTrackId] = useState<string | undefined>(undefined);
   const [monitorMixLevels, setMonitorMixLevels] = useState<Record<string, number>>({});
   const [metronomeBpm, setMetronomeBpm] = useState(120);
   const [metronomeBeatsPerBar, setMetronomeBeatsPerBar] = useState(4);
@@ -235,10 +241,15 @@ export function App() {
         await engine.stopRecording();
         setIsRecording(false);
         setRecordingTrackId(undefined);
+        setLivePreviewTrackId(undefined);
       } else {
         await engine.recordTake(trackId);
         setIsRecording(true);
         setRecordingTrackId(trackId);
+        // trackId is undefined for "record onto a new Track" — resolve to
+        // the Track the engine just created so the live preview knows which
+        // grid cell it belongs to.
+        setLivePreviewTrackId(trackId ?? engine.getActiveProject()!.tracks.at(-1)!.id);
       }
       refreshProject();
     } catch (e) {
@@ -378,6 +389,35 @@ export function App() {
 
     return () => timers.forEach((timer) => timer && clearTimeout(timer));
   }, [isPlaying, gridLayout]);
+
+  // Whether the Track currently being recorded onto needs its own live
+  // preview cell — false once it has a completed Take of its own (recording
+  // a re-take already appears via its existing gridLayout cell).
+  const showLivePreview =
+    isRecording &&
+    livePreviewTrackId !== undefined &&
+    !gridLayout.some((cell) => cell.trackId === livePreviewTrackId);
+  const renderCellCount = gridLayout.length + (showLivePreview ? 1 : 0);
+  const { rows: renderRows, cols: renderCols } = computeGridDimensions(renderCellCount);
+
+  const livePreviewVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Real-time self-view: attach the in-progress capture's live MediaStream
+  // (not a finished mediaRef) so a new Track's cell shows video immediately
+  // instead of only after stopping and reloading the Project.
+  useEffect(() => {
+    const video = livePreviewVideoRef.current;
+    if (!showLivePreview || !video) return;
+
+    const stream = captureAdapter.getActiveStream();
+    if (!stream) return;
+    video.srcObject = stream;
+    void video.play();
+
+    return () => {
+      video.srcObject = null;
+    };
+  }, [showLivePreview, captureAdapter]);
 
   return (
     <main style={{ fontFamily: "sans-serif", padding: 24, maxWidth: 720 }}>
@@ -539,31 +579,37 @@ export function App() {
 
           {/*
             Composite video grid: one cell per visible Track, laid out via
-            the pure computeGridLayout. Video is rendered muted here since
-            audio for composite/monitor playback is driven separately by the
-            engine's playback adapter; each cell's own start is scheduled off
+            the pure computeGridLayout, plus (while recording onto a new or
+            not-yet-completed Track) a live preview cell showing the
+            in-progress capture in real time. Positions are recomputed via
+            computeGridDimensions against the combined cell count rather
+            than gridLayout's own row/col, since adding the live cell can
+            change the grid's shape (e.g. 1 recorded + 1 live -> 1x2, not
+            gridLayout's 1x1). Video is rendered muted here since audio for
+            composite/monitor playback is driven separately by the engine's
+            playback adapter; each recorded cell's own start is scheduled off
             the same startAtMs (see the isPlaying effect above) so the grid
             stays offset-corrected and in sync with that audio.
           */}
-          {gridLayout.length > 0 && (
+          {renderCellCount > 0 && (
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: `repeat(${gridLayout[0].cols}, 1fr)`,
-                gridTemplateRows: `repeat(${gridLayout[0].rows}, 1fr)`,
+                gridTemplateColumns: `repeat(${renderCols}, 1fr)`,
+                gridTemplateRows: `repeat(${renderRows}, 1fr)`,
                 gap: 8,
                 marginTop: 16,
               }}
             >
-              {gridLayout.map((cell) => {
+              {gridLayout.map((cell, index) => {
                 const cellTrack = tracks.find((t) => t.id === cell.trackId)!;
                 const mediaRef = selectedTakeMediaRef(cellTrack);
                 return (
                   <div
                     key={cell.trackId}
                     style={{
-                      gridRow: cell.row + 1,
-                      gridColumn: cell.col + 1,
+                      gridRow: Math.floor(index / renderCols) + 1,
+                      gridColumn: (index % renderCols) + 1,
                       background: "#000",
                       aspectRatio: "16 / 9",
                     }}
@@ -584,6 +630,30 @@ export function App() {
                   </div>
                 );
               })}
+              {showLivePreview &&
+                (() => {
+                  const index = gridLayout.length;
+                  return (
+                    <div
+                      key="live-preview"
+                      style={{
+                        gridRow: Math.floor(index / renderCols) + 1,
+                        gridColumn: (index % renderCols) + 1,
+                        background: "#000",
+                        aspectRatio: "16 / 9",
+                      }}
+                    >
+                      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                      <video
+                        ref={livePreviewVideoRef}
+                        muted
+                        playsInline
+                        autoPlay
+                        style={{ width: "100%", height: "100%" }}
+                      />
+                    </div>
+                  );
+                })()}
             </div>
           )}
         </section>

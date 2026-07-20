@@ -25,6 +25,7 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
   private nextId = 1;
   private active = new Map<string, ActiveCapture>();
   private latencyByHandleId = new Map<string, number | undefined>();
+  private activeCaptureId: string | undefined;
 
   async startCapture(): Promise<CaptureHandle> {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -49,6 +50,7 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
       resolveStopped,
     };
     this.active.set(handle.id, handle);
+    this.activeCaptureId = handle.id;
     recorder.start();
     return { id: handle.id };
   }
@@ -61,10 +63,22 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
     await active.stopped;
     active.stream.getTracks().forEach((track) => track.stop());
     this.active.delete(handle.id);
+    if (this.activeCaptureId === handle.id) this.activeCaptureId = undefined;
     this.latencyByHandleId.set(handle.id, estimateMonitorOutputLatencyMs());
 
     const blob = new Blob(active.chunks, { type: active.recorder.mimeType });
     return URL.createObjectURL(blob);
+  }
+
+  /**
+   * The live `MediaStream` of the in-progress capture, if any — for a
+   * real-time self-view preview while recording. UI-only: not part of the
+   * `CaptureAdapter` seam, since the engine has no use for a live stream
+   * (it only deals in the finished `mediaRef` `stopCapture` returns).
+   */
+  getActiveStream(): MediaStream | undefined {
+    if (!this.activeCaptureId) return undefined;
+    return this.active.get(this.activeCaptureId)?.stream;
   }
 
   /**

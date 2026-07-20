@@ -187,6 +187,19 @@ export function buildMixUpdates(
   return updates;
 }
 
+/**
+ * Near-square row/col dimensions for a grid holding `count` cells, filled
+ * row-major. Shared by `computeGridLayout` and by callers (e.g. the
+ * renderer) that need to size a grid extended with cells outside the
+ * Track/Take model, such as a live in-progress recording's preview.
+ */
+export function computeGridDimensions(count: number): { rows: number; cols: number } {
+  if (count === 0) return { rows: 0, cols: 0 };
+  const cols = Math.ceil(Math.sqrt(count));
+  const rows = Math.ceil(count / cols);
+  return { rows, cols };
+}
+
 /** One Track's position within a simple static video grid Layout. */
 export interface GridCell {
   trackId: TrackId;
@@ -210,8 +223,7 @@ export function computeGridLayout(tracks: Track[]): GridCell[] {
   const count = visibleTracks.length;
   if (count === 0) return [];
 
-  const cols = Math.ceil(Math.sqrt(count));
-  const rows = Math.ceil(count / cols);
+  const { rows, cols } = computeGridDimensions(count);
 
   const offsetsMs = visibleTracks.map(
     (track) => track.takes.find((t) => t.id === track.selectedTakeId)?.offsetMs ?? 0
