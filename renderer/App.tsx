@@ -209,6 +209,16 @@ export function App() {
     setMonitorMixLevels((prev) => ({ ...prev, [targetId]: level }));
   }
 
+  function handleSetTrackMuteSolo(trackId: string, changes: { mute?: boolean; solo?: boolean }) {
+    setError(null);
+    try {
+      engine.setTrackMuteSolo(trackId, changes);
+      refreshProject();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   async function handlePlayToggle() {
     setError(null);
     try {
@@ -306,6 +316,20 @@ export function App() {
                 : {t.takes.length} take(s)
                 {t.mute ? " (muted)" : ""}
                 {t.solo ? " (solo)" : ""}
+                <button
+                  onClick={() => handleSetTrackMuteSolo(t.id, { mute: !t.mute })}
+                  aria-pressed={t.mute}
+                  aria-label={`Mute ${t.name}`}
+                >
+                  {t.mute ? "Unmute" : "Mute"}
+                </button>
+                <button
+                  onClick={() => handleSetTrackMuteSolo(t.id, { solo: !t.solo })}
+                  aria-pressed={t.solo}
+                  aria-label={`Solo ${t.name}`}
+                >
+                  {t.solo ? "Unsolo" : "Solo"}
+                </button>
                 {t.takes.length > 0 && (
                   <select
                     value={t.selectedTakeId ?? ""}
