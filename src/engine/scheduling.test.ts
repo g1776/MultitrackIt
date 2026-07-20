@@ -6,7 +6,7 @@ import {
   buildCompositeSchedule,
   computeGridLayout,
 } from "./scheduling";
-import type { Track } from "./types";
+import type { Guide, Track } from "./types";
 
 function makeTrack(overrides: Partial<Track> & { id: string }): Track {
   return {
@@ -125,6 +125,7 @@ describe("buildMonitorMixSchedule", () => {
 
     const schedule = buildMonitorMixSchedule(
       [trackA, trackB, recordingTrack],
+      null,
       new Map(),
       "c"
     );
@@ -141,16 +142,50 @@ describe("buildMonitorMixSchedule", () => {
     });
     const schedule = buildMonitorMixSchedule(
       [trackA],
+      null,
       new Map([["a", 0.3]]),
       undefined
     );
     expect(schedule.entries[0].volume).toBe(0.3);
   });
 
-  it("returns an empty schedule when there are no other recorded Tracks", () => {
+  it("returns an empty schedule when there are no other recorded Tracks and no Guide", () => {
     const recordingTrack = makeTrack({ id: "c" });
-    const schedule = buildMonitorMixSchedule([recordingTrack], new Map(), "c");
+    const schedule = buildMonitorMixSchedule([recordingTrack], null, new Map(), "c");
     expect(schedule.entries).toEqual([]);
+  });
+
+  it("includes the Guide at its Monitor Mix level, starting at 0", () => {
+    const guide: Guide = { mediaRef: "guide-media" };
+    const schedule = buildMonitorMixSchedule(
+      [],
+      guide,
+      new Map([["guide", 0.4]]),
+      undefined
+    );
+    expect(schedule.entries).toEqual([
+      { takeId: "guide", mediaRef: "guide-media", startAtMs: 0, volume: 0.4, muted: false },
+    ]);
+  });
+
+  it("defaults the Guide's Monitor Mix volume to 1 when no level is set", () => {
+    const guide: Guide = { mediaRef: "guide-media" };
+    const schedule = buildMonitorMixSchedule([], guide, new Map(), undefined);
+    expect(schedule.entries[0].volume).toBe(1);
+  });
+
+  it("syncs the Guide alongside Track Takes, sharing the same negative-offset shift", () => {
+    const guide: Guide = { mediaRef: "guide-media" };
+    const trackA = makeTrack({
+      id: "a",
+      takes: [take("take-a", "a", -100)],
+      selectedTakeId: "take-a",
+    });
+    const schedule = buildMonitorMixSchedule([trackA], guide, new Map(), undefined);
+    expect(schedule.entries.map((e) => ({ takeId: e.takeId, startAtMs: e.startAtMs }))).toEqual([
+      { takeId: "take-a", startAtMs: 0 },
+      { takeId: "guide", startAtMs: 100 },
+    ]);
   });
 });
 

@@ -19,9 +19,15 @@ export interface Track {
   solo: boolean;
 }
 
+export interface Guide {
+  /** Opaque handle to the imported reference audio, produced by the import adapter. */
+  mediaRef: string;
+}
+
 export interface Project {
   name: string;
   tracks: Track[];
+  guide: Guide | null;
 }
 
 export interface MonitorMixLevel {

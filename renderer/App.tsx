@@ -30,6 +30,31 @@ function TrackNameInput({ name, onRename }: { name: string; onRename: (name: str
   );
 }
 
+function MonitorMixVolumeSlider({
+  label,
+  volume,
+  onChange,
+}: {
+  label: string;
+  volume: number;
+  onChange: (volume: number) => void;
+}) {
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 4, marginLeft: 8 }}>
+      Monitor Mix ({label}):
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        value={volume}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label={`Monitor Mix volume for ${label}`}
+      />
+    </label>
+  );
+}
+
 export function App() {
   const engine = useMemo(
     () => new RecordingEngine(new BrowserCaptureAdapter(), new BrowserPlaybackAdapter()),
@@ -42,6 +67,7 @@ export function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recordingTrackId, setRecordingTrackId] = useState<string | undefined>(undefined);
+  const [monitorMixLevels, setMonitorMixLevels] = useState<Record<string, number>>({});
 
   function refreshProject() {
     const activeProject = engine.getActiveProject();
@@ -99,6 +125,21 @@ export function App() {
     }
   }
 
+  function handleImportGuide(file: File) {
+    setError(null);
+    try {
+      engine.importGuide(URL.createObjectURL(file));
+      refreshProject();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  function handleMonitorMixChange(targetId: string, level: number) {
+    engine.setMonitorMixLevel(targetId, level);
+    setMonitorMixLevels((prev) => ({ ...prev, [targetId]: level }));
+  }
+
   async function handlePlayToggle() {
     setError(null);
     try {
@@ -152,6 +193,32 @@ export function App() {
             <p>Monitoring {tracks.length - 1} previously recorded Track(s) in sync while you record.</p>
           )}
 
+          <section style={{ marginTop: 8 }}>
+            <label>
+              Guide (backing track / click):{" "}
+              <input
+                type="file"
+                accept="audio/*"
+                aria-label="Import Guide"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleImportGuide(file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {project.guide && (
+              <>
+                {" "}(Guide imported, excluded from composite playback)
+                <MonitorMixVolumeSlider
+                  label="Guide"
+                  volume={monitorMixLevels["guide"] ?? 1}
+                  onChange={(level) => handleMonitorMixChange("guide", level)}
+                />
+              </>
+            )}
+          </section>
+
           <ul>
             {tracks.map((t) => (
               <li key={t.id}>
@@ -181,6 +248,11 @@ export function App() {
                 >
                   {isRecording && recordingTrackId === t.id ? "Stop Recording" : "Record Take"}
                 </button>
+                <MonitorMixVolumeSlider
+                  label={t.name}
+                  volume={monitorMixLevels[t.id] ?? 1}
+                  onChange={(level) => handleMonitorMixChange(t.id, level)}
+                />
               </li>
             ))}
           </ul>

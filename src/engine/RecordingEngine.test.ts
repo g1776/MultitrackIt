@@ -254,4 +254,57 @@ describe("RecordingEngine", () => {
       expect(engine.getMonitorMixLevel("guide")).toBe(0.5);
     });
   });
+
+  describe("importGuide", () => {
+    it("sets the Project's Guide, distinct from any Track, with no Takes", () => {
+      engine.createProject("My Song");
+
+      const guide = engine.importGuide("guide-media-ref");
+
+      expect(guide.mediaRef).toBe("guide-media-ref");
+      expect(engine.getActiveProject()!.guide).toEqual({ mediaRef: "guide-media-ref" });
+      expect(engine.getActiveProject()!.tracks).toEqual([]);
+    });
+
+    it("replaces a previously imported Guide", () => {
+      engine.createProject("My Song");
+      engine.importGuide("first-guide");
+
+      engine.importGuide("second-guide");
+
+      expect(engine.getActiveProject()!.guide).toEqual({ mediaRef: "second-guide" });
+    });
+
+    it("throws when importing a Guide with no active Project", () => {
+      expect(() => engine.importGuide("guide-media-ref")).toThrow();
+    });
+  });
+
+  describe("Guide during recording and playback", () => {
+    it("includes the Guide in the Monitor Mix at its Monitor Mix level while recording", async () => {
+      engine.createProject("My Song");
+      engine.importGuide("guide-media-ref");
+      engine.setMonitorMixLevel("guide", 0.6);
+
+      await engine.recordTake(undefined);
+
+      expect(playback.playedSchedules).toHaveLength(1);
+      const monitorSchedule = playback.playedSchedules[0];
+      expect(monitorSchedule.entries).toEqual([
+        { takeId: "guide", mediaRef: "guide-media-ref", startAtMs: 0, volume: 0.6, muted: false },
+      ]);
+    });
+
+    it("excludes the Guide from composite playback by default", async () => {
+      engine.createProject("My Song");
+      engine.importGuide("guide-media-ref");
+      await engine.recordTake(undefined);
+      await engine.stopRecording();
+
+      await engine.play();
+
+      const schedule = playback.playedSchedules[playback.playedSchedules.length - 1];
+      expect(schedule.entries.some((e) => e.takeId === "guide")).toBe(false);
+    });
+  });
 });

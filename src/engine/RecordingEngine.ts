@@ -1,5 +1,5 @@
 import type { CaptureAdapter, CaptureHandle, PlaybackAdapter, PlaybackHandle } from "./adapters";
-import type { EngineStatus, Project, Take, TakeId, Track, TrackId } from "./types";
+import type { EngineStatus, Guide, Project, Take, TakeId, Track, TrackId } from "./types";
 import { buildCompositeSchedule, buildMonitorMixSchedule } from "./scheduling";
 
 let idCounter = 0;
@@ -28,8 +28,16 @@ export class RecordingEngine {
   ) {}
 
   createProject(name: string): Project {
-    this.project = { name, tracks: [] };
+    this.project = { name, tracks: [], guide: null };
     return this.project;
+  }
+
+  /** Imports reference audio as the Project's Guide, replacing any existing one. */
+  importGuide(mediaRef: string): Guide {
+    const project = this.requireProject();
+    const guide: Guide = { mediaRef };
+    project.guide = guide;
+    return guide;
   }
 
   getActiveProject(): Project | null {
@@ -55,7 +63,12 @@ export class RecordingEngine {
     // Monitor Mix: play back previously recorded Tracks' selected Takes,
     // offset-corrected and in sync, so the performer can record against
     // them. The Track being recorded onto is excluded.
-    const monitorSchedule = buildMonitorMixSchedule(project.tracks, this.monitorMix, track.id);
+    const monitorSchedule = buildMonitorMixSchedule(
+      project.tracks,
+      project.guide,
+      this.monitorMix,
+      track.id
+    );
     if (monitorSchedule.entries.length > 0) {
       this.activeMonitorPlaybackHandle = await this.playback.play(monitorSchedule);
     }

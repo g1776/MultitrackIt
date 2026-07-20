@@ -1,5 +1,5 @@
 import type { PlaybackSchedule, PlaybackScheduleEntry } from "./adapters";
-import type { Track, TrackId } from "./types";
+import type { Guide, Track, TrackId } from "./types";
 
 /**
  * A Take reduced to just what's needed to schedule it for playback, before
@@ -73,18 +73,32 @@ function scheduleInputsForTracks(
 /**
  * Monitor Mix schedule played while recording a new Take: the selected
  * Takes of previously recorded Tracks, offset-corrected and sync'd, at
- * their Monitor Mix levels. The Track currently being recorded onto
- * (`recordingTrackId`) is excluded so the performer only hears prior parts.
+ * their Monitor Mix levels, plus the Guide (if any) at its own Monitor Mix
+ * level, always starting at offset 0. The Track currently being recorded
+ * onto (`recordingTrackId`) is excluded so the performer only hears prior
+ * parts. The Guide is included here even though it's excluded from
+ * composite playback, since Monitor Mix is recording-only.
  */
 export function buildMonitorMixSchedule(
   tracks: Track[],
-  monitorMixLevels: Map<TrackId, number>,
+  guide: Guide | null,
+  monitorMixLevels: Map<TrackId | "guide", number>,
   recordingTrackId: TrackId | undefined
 ): PlaybackSchedule {
   const otherTracks = recordingTrackId
     ? tracks.filter((t) => t.id !== recordingTrackId)
     : tracks;
-  return computePlaybackSchedule(scheduleInputsForTracks(otherTracks, monitorMixLevels));
+  const inputs = scheduleInputsForTracks(otherTracks, monitorMixLevels);
+  if (guide) {
+    inputs.push({
+      takeId: "guide",
+      mediaRef: guide.mediaRef,
+      offsetMs: 0,
+      volume: monitorMixLevels.get("guide") ?? 1,
+      muted: false,
+    });
+  }
+  return computePlaybackSchedule(inputs);
 }
 
 /**
