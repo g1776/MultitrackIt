@@ -41,6 +41,7 @@ export function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recordingTrackId, setRecordingTrackId] = useState<string | undefined>(undefined);
 
   function refreshProject() {
     const activeProject = engine.getActiveProject();
@@ -59,15 +60,17 @@ export function App() {
     refreshProject();
   }
 
-  async function handleRecordToggle() {
+  async function handleRecordToggle(trackId?: string) {
     setError(null);
     try {
       if (isRecording) {
         await engine.stopRecording();
         setIsRecording(false);
+        setRecordingTrackId(undefined);
       } else {
-        await engine.recordTake(undefined);
+        await engine.recordTake(trackId);
         setIsRecording(true);
+        setRecordingTrackId(trackId);
       }
       refreshProject();
     } catch (e) {
@@ -133,8 +136,11 @@ export function App() {
       {project && (
         <section>
           <h2>{project.name}</h2>
-          <button onClick={handleRecordToggle}>
-            {isRecording ? "Stop Recording" : "Record"}
+          <button
+            onClick={() => handleRecordToggle(undefined)}
+            disabled={isRecording && recordingTrackId !== undefined}
+          >
+            {isRecording && recordingTrackId === undefined ? "Stop Recording" : "Record New Track"}
           </button>
           {hasAnyRecordedTake && (
             <button onClick={handlePlayToggle} disabled={isRecording}>
@@ -169,6 +175,12 @@ export function App() {
                     ))}
                   </select>
                 )}
+                <button
+                  onClick={() => handleRecordToggle(t.id)}
+                  disabled={isRecording && recordingTrackId !== t.id}
+                >
+                  {isRecording && recordingTrackId === t.id ? "Stop Recording" : "Record Take"}
+                </button>
               </li>
             ))}
           </ul>
