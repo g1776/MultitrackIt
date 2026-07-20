@@ -8,6 +8,28 @@ function selectedTakeMediaRef(track: Track): string | undefined {
   return track.takes.find((t) => t.id === track.selectedTakeId)?.mediaRef;
 }
 
+function TrackNameInput({ name, onRename }: { name: string; onRename: (name: string) => void }) {
+  const [draft, setDraft] = useState(name);
+
+  useEffect(() => setDraft(name), [name]);
+
+  function commit() {
+    if (draft.trim() && draft.trim() !== name) onRename(draft.trim());
+    else setDraft(name);
+  }
+
+  return (
+    <input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      aria-label={`Rename ${name}`}
+      style={{ width: 120 }}
+    />
+  );
+}
+
 export function App() {
   const engine = useMemo(
     () => new RecordingEngine(new BrowserCaptureAdapter(), new BrowserPlaybackAdapter()),
@@ -47,6 +69,27 @@ export function App() {
         await engine.recordTake(undefined);
         setIsRecording(true);
       }
+      refreshProject();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  function handleRenameTrack(trackId: string, name: string) {
+    if (!name.trim()) return;
+    setError(null);
+    try {
+      engine.renameTrack(trackId, name.trim());
+      refreshProject();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  function handleSelectTake(trackId: string, takeId: string) {
+    setError(null);
+    try {
+      engine.selectTake(trackId, takeId);
       refreshProject();
     } catch (e) {
       setError((e as Error).message);
@@ -106,9 +149,26 @@ export function App() {
           <ul>
             {tracks.map((t) => (
               <li key={t.id}>
-                {t.name}: {t.takes.length} take(s)
+                <TrackNameInput
+                  name={t.name}
+                  onRename={(name) => handleRenameTrack(t.id, name)}
+                />
+                : {t.takes.length} take(s)
                 {t.mute ? " (muted)" : ""}
                 {t.solo ? " (solo)" : ""}
+                {t.takes.length > 0 && (
+                  <select
+                    value={t.selectedTakeId ?? ""}
+                    onChange={(e) => handleSelectTake(t.id, e.target.value)}
+                    aria-label={`Select take for ${t.name}`}
+                  >
+                    {t.takes.map((take, i) => (
+                      <option key={take.id} value={take.id}>
+                        Take {i + 1}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </li>
             ))}
           </ul>

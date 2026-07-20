@@ -91,6 +91,11 @@ export class RecordingEngine {
     this.status = "idle";
   }
 
+  renameTrack(trackId: TrackId, name: string): void {
+    const track = this.requireTrack(trackId);
+    track.name = name;
+  }
+
   selectTake(trackId: TrackId, takeId: TakeId): void {
     const track = this.requireTrack(trackId);
     if (!track.takes.some((t) => t.id === takeId)) {

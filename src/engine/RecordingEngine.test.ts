@@ -96,6 +96,23 @@ describe("RecordingEngine", () => {
     });
   });
 
+  describe("renameTrack", () => {
+    it("changes the Track's name", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      const trackId = engine.getActiveProject()!.tracks[0].id;
+
+      engine.renameTrack(trackId, "Lead Vocal");
+
+      expect(engine.getActiveProject()!.tracks[0].name).toBe("Lead Vocal");
+    });
+
+    it("throws when renaming an unknown Track", () => {
+      engine.createProject("My Song");
+      expect(() => engine.renameTrack("nope", "X")).toThrow();
+    });
+  });
+
   describe("play", () => {
     it("plays back a Track's selected Take (audio+video together)", async () => {
       engine.createProject("My Song");
