@@ -12,6 +12,8 @@ export class FakeCaptureAdapter implements CaptureAdapter {
   private nextId = 1;
   public startedHandles: CaptureHandle[] = [];
   public stoppedMediaRefs: string[] = [];
+  /** Set to control what `getLatencyMs` reports for the next `stopCapture`. */
+  public reportedLatencyMs: number | undefined = undefined;
 
   async startCapture(): Promise<CaptureHandle> {
     const handle = { id: `capture-${this.nextId++}` };
@@ -23,6 +25,10 @@ export class FakeCaptureAdapter implements CaptureAdapter {
     const mediaRef = `media-${handle.id}`;
     this.stoppedMediaRefs.push(mediaRef);
     return mediaRef;
+  }
+
+  getLatencyMs(): number | undefined {
+    return this.reportedLatencyMs;
   }
 }
 

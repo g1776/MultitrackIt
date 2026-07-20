@@ -10,6 +10,14 @@ export interface CaptureAdapter {
   startCapture(): Promise<CaptureHandle>;
   /** Stop capturing and persist the result, returning an opaque media ref. */
   stopCapture(handle: CaptureHandle): Promise<string>;
+  /**
+   * Estimated round-trip monitoring/recording latency (ms) for the capture
+   * just stopped: the delay between Monitor Mix output and its arrival in
+   * the captured input (e.g. from `AudioContext` output/input latency, or a
+   * calibration tone measurement). Undefined when no estimate is available,
+   * in which case no correction is applied.
+   */
+  getLatencyMs?(): number | undefined;
 }
 
 export interface CaptureHandle {

@@ -60,6 +60,43 @@ describe("RecordingEngine", () => {
       expect(engine.getStatus()).toBe("idle");
       expect(playback.playedSchedules).toHaveLength(0);
     });
+
+    it("sets the new Take's Offset from the capture adapter's measured latency, negated to compensate", async () => {
+      engine.createProject("My Song");
+      capture.reportedLatencyMs = 80;
+      await engine.recordTake(undefined);
+
+      await engine.stopRecording();
+
+      const take = engine.getActiveProject()!.tracks[0].takes[0];
+      expect(take.offsetMs).toBe(-80);
+    });
+
+    it("defaults the new Take's Offset to 0 when the capture adapter reports no latency estimate", async () => {
+      engine.createProject("My Song");
+      capture.reportedLatencyMs = undefined;
+      await engine.recordTake(undefined);
+
+      await engine.stopRecording();
+
+      const take = engine.getActiveProject()!.tracks[0].takes[0];
+      expect(take.offsetMs).toBe(0);
+    });
+
+    it("defaults the new Take's Offset to 0 when the capture adapter doesn't implement latency reporting", async () => {
+      const noLatencyCapture: import("./adapters").CaptureAdapter = {
+        startCapture: () => capture.startCapture(),
+        stopCapture: (handle) => capture.stopCapture(handle),
+      };
+      const bareEngine = new RecordingEngine(noLatencyCapture, playback);
+      bareEngine.createProject("My Song");
+      await bareEngine.recordTake(undefined);
+
+      await bareEngine.stopRecording();
+
+      const take = bareEngine.getActiveProject()!.tracks[0].takes[0];
+      expect(take.offsetMs).toBe(0);
+    });
   });
 
   describe("recordTake on an existing Track", () => {

@@ -24,6 +24,7 @@ interface ActiveCapture extends CaptureHandle {
 export class BrowserCaptureAdapter implements CaptureAdapter {
   private nextId = 1;
   private active = new Map<string, ActiveCapture>();
+  private latencyByHandleId = new Map<string, number | undefined>();
 
   async startCapture(): Promise<CaptureHandle> {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -60,10 +61,33 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
     await active.stopped;
     active.stream.getTracks().forEach((track) => track.stop());
     this.active.delete(handle.id);
+    this.latencyByHandleId.set(handle.id, estimateMonitorOutputLatencyMs());
 
     const blob = new Blob(active.chunks, { type: active.recorder.mimeType });
     return URL.createObjectURL(blob);
   }
+
+  /**
+   * Returns the latency estimated for the capture most recently stopped.
+   * Best-effort estimate of Monitor Mix *output* latency only, via
+   * `AudioContext` — the Web Audio API exposes no input-side latency, so
+   * this doesn't capture mic/input delay. A calibration-tone adapter (per
+   * the originating spec) would give a fuller round-trip figure.
+   */
+  getLatencyMs(): number | undefined {
+    const lastHandleId = `capture-${this.nextId - 1}`;
+    return this.latencyByHandleId.get(lastHandleId);
+  }
+}
+
+function estimateMonitorOutputLatencyMs(): number | undefined {
+  if (typeof AudioContext === "undefined") return undefined;
+
+  const audioContext = new AudioContext();
+  const outputLatencySec = audioContext.outputLatency || audioContext.baseLatency || 0;
+  void audioContext.close();
+
+  return outputLatencySec > 0 ? outputLatencySec * 1000 : undefined;
 }
 
 interface ActivePlayback extends PlaybackHandle {

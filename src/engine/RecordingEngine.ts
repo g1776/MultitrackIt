@@ -89,11 +89,14 @@ export class RecordingEngine {
     }
 
     const track = this.requireTrack(trackId);
+    const latencyMs = this.capture.getLatencyMs?.();
     const take: Take = {
       id: nextId("take"),
       trackId,
       mediaRef,
-      offsetMs: 0,
+      // Negated: a Take recorded against Monitor Mix output that arrived
+      // `latencyMs` late needs to start that much earlier to line back up.
+      offsetMs: latencyMs ? -latencyMs : 0,
       createdAt: Date.now(),
     };
     track.takes.push(take);
