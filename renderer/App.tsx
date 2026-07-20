@@ -3,6 +3,12 @@ import { RecordingEngine } from "../src/engine/RecordingEngine";
 import { BrowserCaptureAdapter, BrowserPlaybackAdapter } from "../src/adapters/browserAdapters";
 import { computeGridLayout } from "../src/engine/scheduling";
 import type { Project, Track } from "../src/engine/types";
+import { generateMetronomeGuideAudio } from "../src/adapters/metronomeAudio";
+
+// Fixed rather than user-configurable: long enough to cover most songs, and
+// simpler than asking the user to guess a duration before they've recorded
+// anything to measure against.
+const METRONOME_GUIDE_DURATION_MS = 5 * 60 * 1000;
 
 function selectedTakeMediaRef(track: Track): string | undefined {
   return track.takes.find((t) => t.id === track.selectedTakeId)?.mediaRef;
@@ -27,6 +33,52 @@ function TrackNameInput({ name, onRename }: { name: string; onRename: (name: str
       aria-label={`Rename ${name}`}
       style={{ width: 120 }}
     />
+  );
+}
+
+function MetronomeGuideControls({
+  bpm,
+  beatsPerBar,
+  onBpmChange,
+  onBeatsPerBarChange,
+  onGenerate,
+}: {
+  bpm: number;
+  beatsPerBar: number;
+  onBpmChange: (bpm: number) => void;
+  onBeatsPerBarChange: (beatsPerBar: number) => void;
+  onGenerate: () => void;
+}) {
+  return (
+    <>
+      <label>
+        BPM:{" "}
+        <input
+          type="number"
+          min={20}
+          max={300}
+          value={bpm}
+          onChange={(e) => onBpmChange(Number(e.target.value))}
+          aria-label="Metronome BPM"
+          style={{ width: 60 }}
+        />
+      </label>{" "}
+      <label>
+        Beats per bar:{" "}
+        <select
+          value={beatsPerBar}
+          onChange={(e) => onBeatsPerBarChange(Number(e.target.value))}
+          aria-label="Metronome beats per bar"
+        >
+          {[2, 3, 4, 5, 6].map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </label>{" "}
+      <button onClick={onGenerate}>Generate Metronome Guide</button>
+    </>
   );
 }
 
@@ -68,6 +120,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [recordingTrackId, setRecordingTrackId] = useState<string | undefined>(undefined);
   const [monitorMixLevels, setMonitorMixLevels] = useState<Record<string, number>>({});
+  const [metronomeBpm, setMetronomeBpm] = useState(120);
+  const [metronomeBeatsPerBar, setMetronomeBeatsPerBar] = useState(4);
 
   function refreshProject() {
     const activeProject = engine.getActiveProject();
@@ -129,6 +183,21 @@ export function App() {
     setError(null);
     try {
       engine.importGuide(URL.createObjectURL(file));
+      refreshProject();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  function handleGenerateMetronomeGuide() {
+    setError(null);
+    try {
+      const mediaRef = generateMetronomeGuideAudio({
+        bpm: metronomeBpm,
+        beatsPerBar: metronomeBeatsPerBar,
+        durationMs: METRONOME_GUIDE_DURATION_MS,
+      });
+      engine.importGuide(mediaRef);
       refreshProject();
     } catch (e) {
       setError((e as Error).message);
@@ -207,6 +276,14 @@ export function App() {
                 }}
               />
             </label>
+            {" or "}
+            <MetronomeGuideControls
+              bpm={metronomeBpm}
+              beatsPerBar={metronomeBeatsPerBar}
+              onBpmChange={setMetronomeBpm}
+              onBeatsPerBarChange={setMetronomeBeatsPerBar}
+              onGenerate={handleGenerateMetronomeGuide}
+            />
             {project.guide && (
               <>
                 {" "}(Guide imported, excluded from composite playback)
