@@ -30,8 +30,7 @@ export interface ScheduleInput {
 export function computePlaybackSchedule(inputs: ScheduleInput[]): PlaybackSchedule {
   if (inputs.length === 0) return { entries: [] };
 
-  const earliestOffsetMs = Math.min(...inputs.map((i) => i.offsetMs));
-  const shiftMs = earliestOffsetMs < 0 ? -earliestOffsetMs : 0;
+  const shiftMs = offsetShiftMs(inputs.map((i) => i.offsetMs));
   const entries: PlaybackScheduleEntry[] = inputs.map((input) => ({
     takeId: input.takeId,
     mediaRef: input.mediaRef,
@@ -41,6 +40,18 @@ export function computePlaybackSchedule(inputs: ScheduleInput[]): PlaybackSchedu
   }));
 
   return { entries };
+}
+
+/**
+ * How far forward a set of signed Offsets must be shifted so the earliest
+ * lands at 0, preserving relative timing. Shared by `computePlaybackSchedule`
+ * and `computeGridLayout` so the visible grid and the audio it accompanies
+ * are always normalized against the same zero point.
+ */
+function offsetShiftMs(offsetsMs: number[]): number {
+  if (offsetsMs.length === 0) return 0;
+  const earliestOffsetMs = Math.min(...offsetsMs);
+  return earliestOffsetMs < 0 ? -earliestOffsetMs : 0;
 }
 
 /**
@@ -183,12 +194,16 @@ export interface GridCell {
   col: number;
   rows: number;
   cols: number;
+  /** When this cell's video should start relative to playback start, offset-corrected and normalized the same way as the audio schedule (see `computePlaybackSchedule`). */
+  startAtMs: number;
 }
 
 /**
  * Computes a simple static grid Layout: one cell per visible Track (audible
  * per solo/mute rules and having a selected Take), arranged into a
- * near-square grid, filled row-major.
+ * near-square grid, filled row-major. Each cell's `startAtMs` uses the same
+ * offset normalization as `computePlaybackSchedule`, so a caller driving the
+ * grid's video elements off it stays in sync with the audio.
  */
 export function computeGridLayout(tracks: Track[]): GridCell[] {
   const visibleTracks = selectAudibleTracks(tracks);
@@ -198,11 +213,17 @@ export function computeGridLayout(tracks: Track[]): GridCell[] {
   const cols = Math.ceil(Math.sqrt(count));
   const rows = Math.ceil(count / cols);
 
+  const offsetsMs = visibleTracks.map(
+    (track) => track.takes.find((t) => t.id === track.selectedTakeId)?.offsetMs ?? 0
+  );
+  const shiftMs = offsetShiftMs(offsetsMs);
+
   return visibleTracks.map((track, index) => ({
     trackId: track.id,
     row: Math.floor(index / cols),
     col: index % cols,
     rows,
     cols,
+    startAtMs: offsetsMs[index] + shiftMs,
   }));
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RecordingEngine } from "../src/engine/RecordingEngine";
 import { BrowserCaptureAdapter, BrowserPlaybackAdapter } from "../src/adapters/browserAdapters";
 import { computeGridLayout } from "../src/engine/scheduling";
@@ -356,6 +356,29 @@ export function App() {
   const hasAnyRecordedTake = tracks.some((t) => t.selectedTakeId);
   const gridLayout = useMemo(() => computeGridLayout(tracks), [tracks]);
 
+  const gridVideoRefs = useRef(new Map<string, HTMLVideoElement>());
+
+  // Drives each grid cell's <video> off the same startAtMs the audio-only
+  // playback adapter uses, so the visible grid stays offset-corrected and in
+  // sync with the audio instead of every cell naively starting at once.
+  useEffect(() => {
+    if (!isPlaying) {
+      gridVideoRefs.current.forEach((video) => {
+        video.pause();
+        video.currentTime = 0;
+      });
+      return;
+    }
+
+    const timers = gridLayout.map((cell) => {
+      const video = gridVideoRefs.current.get(cell.trackId);
+      if (!video) return undefined;
+      return setTimeout(() => void video.play(), cell.startAtMs);
+    });
+
+    return () => timers.forEach((timer) => timer && clearTimeout(timer));
+  }, [isPlaying, gridLayout]);
+
   return (
     <main style={{ fontFamily: "sans-serif", padding: 24, maxWidth: 720 }}>
       <h1>MultitrackIt</h1>
@@ -518,8 +541,9 @@ export function App() {
             Composite video grid: one cell per visible Track, laid out via
             the pure computeGridLayout. Video is rendered muted here since
             audio for composite/monitor playback is driven separately by the
-            engine's playback adapter (offset-corrected, sync'd); this grid
-            is the visual counterpart of that same schedule.
+            engine's playback adapter; each cell's own start is scheduled off
+            the same startAtMs (see the isPlaying effect above) so the grid
+            stays offset-corrected and in sync with that audio.
           */}
           {gridLayout.length > 0 && (
             <div
@@ -547,10 +571,13 @@ export function App() {
                     {mediaRef && (
                       // eslint-disable-next-line jsx-a11y/media-has-caption
                       <video
+                        ref={(el) => {
+                          if (el) gridVideoRefs.current.set(cell.trackId, el);
+                          else gridVideoRefs.current.delete(cell.trackId);
+                        }}
                         src={mediaRef}
                         muted
                         playsInline
-                        autoPlay={isPlaying}
                         style={{ width: "100%", height: "100%" }}
                       />
                     )}

@@ -316,13 +316,33 @@ describe("computeGridLayout", () => {
     ];
     const layout = computeGridLayout(tracks);
     expect(layout).toEqual([
-      { trackId: "a", row: 0, col: 0, rows: 2, cols: 2 },
-      { trackId: "b", row: 0, col: 1, rows: 2, cols: 2 },
-      { trackId: "c", row: 1, col: 0, rows: 2, cols: 2 },
+      { trackId: "a", row: 0, col: 0, rows: 2, cols: 2, startAtMs: 0 },
+      { trackId: "b", row: 0, col: 1, rows: 2, cols: 2, startAtMs: 0 },
+      { trackId: "c", row: 1, col: 0, rows: 2, cols: 2, startAtMs: 0 },
     ]);
   });
 
   it("returns an empty layout for an empty Track list", () => {
     expect(computeGridLayout([])).toEqual([]);
+  });
+
+  it("reports each cell's startAtMs using the same offset normalization as playback, so the grid stays in sync with the audio", () => {
+    const tracks = [
+      makeTrack({
+        id: "a",
+        selectedTakeId: "t1",
+        takes: [{ id: "t1", trackId: "a", mediaRef: "m1", offsetMs: -200, createdAt: 0 }],
+      }),
+      makeTrack({
+        id: "b",
+        selectedTakeId: "t2",
+        takes: [{ id: "t2", trackId: "b", mediaRef: "m2", offsetMs: 100, createdAt: 0 }],
+      }),
+    ];
+    const layout = computeGridLayout(tracks);
+    expect(layout.map((c) => ({ trackId: c.trackId, startAtMs: c.startAtMs }))).toEqual([
+      { trackId: "a", startAtMs: 0 },
+      { trackId: "b", startAtMs: 300 },
+    ]);
   });
 });
