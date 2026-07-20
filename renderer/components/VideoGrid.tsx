@@ -18,12 +18,15 @@ function selectedTakeMediaRef(track: Track): string | undefined {
  * gridLayout's 1x1). Video is rendered muted here since audio for
  * composite/monitor playback is driven separately by the engine's playback
  * adapter; each recorded cell's own start is scheduled off the same
- * startAtMs (see the isPlaying effect below) so the grid stays
- * offset-corrected and in sync with that audio.
+ * startAtMs (see the isPlaying/isRecording effect below) so the grid stays
+ * offset-corrected and in sync with that audio during both composite
+ * playback and while monitoring previously recorded Tracks during a new
+ * recording.
  */
 export function VideoGrid({ tracks }: { tracks: Track[] }) {
   const isRecording = useTransportStore((s) => s.isRecording);
   const isPlaying = useTransportStore((s) => s.isPlaying);
+  const recordingTrackId = useTransportStore((s) => s.recordingTrackId);
   const livePreviewTrackId = useTransportStore((s) => s.livePreviewTrackId);
 
   const gridLayout = useMemo(() => computeGridLayout(tracks), [tracks]);
@@ -31,9 +34,17 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
 
   // Drives each grid cell's <video> off the same startAtMs the audio-only
   // playback adapter uses, so the visible grid stays offset-corrected and in
-  // sync with the audio instead of every cell naively starting at once.
+  // sync with the audio instead of every cell naively starting at once. Runs
+  // during recording too (not just composite "Play All Tracks"): the engine
+  // already starts a separate hidden monitor-mix playback for the *audio* of
+  // previously recorded Tracks as soon as recording starts, but that's a
+  // parallel, off-DOM `<video>` element decoupled from the grid's own cells
+  // — without this, the grid's video stayed paused throughout recording.
+  // The Track currently being recorded onto is excluded even if it already
+  // has a cell from an earlier Take (a re-take), since monitoring your own
+  // about-to-be-replaced previous Take isn't meaningful.
   useEffect(() => {
-    if (!isPlaying) {
+    if (!isPlaying && !isRecording) {
       gridVideoRefs.current.forEach((video) => {
         video.pause();
         video.currentTime = 0;
@@ -41,14 +52,16 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
       return;
     }
 
-    const timers = gridLayout.map((cell) => {
-      const video = gridVideoRefs.current.get(cell.trackId);
-      if (!video) return undefined;
-      return setTimeout(() => void video.play(), cell.startAtMs);
-    });
+    const timers = gridLayout
+      .filter((cell) => cell.trackId !== recordingTrackId)
+      .map((cell) => {
+        const video = gridVideoRefs.current.get(cell.trackId);
+        if (!video) return undefined;
+        return setTimeout(() => void video.play(), cell.startAtMs);
+      });
 
     return () => timers.forEach((timer) => timer && clearTimeout(timer));
-  }, [isPlaying, gridLayout]);
+  }, [isPlaying, isRecording, recordingTrackId, gridLayout]);
 
   // Whether the Track currently being recorded onto needs its own live
   // preview cell — false once it has a completed Take of its own (recording
