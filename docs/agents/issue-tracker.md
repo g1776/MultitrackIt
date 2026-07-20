@@ -13,6 +13,15 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
 
+## Before closing an issue with acceptance criteria
+
+If the issue body has an acceptance-criteria checklist, don't close it with boxes left unchecked. Before closing:
+
+- For each unchecked box, either verify it (drive the actual behavior — run the app, don't just read the code — per the `verify` skill) and check it off with `gh issue edit <number> --body-file -` or equivalent, or
+- Leave it unchecked and explicitly say why in the close comment (deferred, descoped, superseded by another issue), and file a follow-up issue if it's deferred rather than intentionally dropped.
+
+A checklist with unchecked boxes on a closed issue means "this shipped but nobody confirmed it" — treat that as a signal to investigate, not as done. (See #3/#10 for the incident that prompted this rule: a video-grid UI feature was implemented and the issue closed without ever being run/observed.)
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
