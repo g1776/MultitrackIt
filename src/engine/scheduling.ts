@@ -95,7 +95,7 @@ export function buildMonitorMixSchedule(
     ? tracks.filter((t) => t.id !== recordingTrackId)
     : tracks;
   const inputs = scheduleInputsForTracks(otherTracks, monitorMixLevels);
-  if (guide) {
+  if (guide && guide.includeInMonitorMix) {
     inputs.push({
       takeId: "guide",
       mediaRef: guide.mediaRef,
@@ -114,11 +114,15 @@ export function buildMonitorMixSchedule(
  * rather than omitted, so a schedule built once still has every Take's
  * element in sync and ready — toggling mute/solo later only needs to flip
  * `muted`/`volume` on an already-playing entry via `buildMixUpdates`,
- * instead of restarting or re-syncing playback.
+ * instead of restarting or re-syncing playback. The Guide, if present, is
+ * included the same way — always present as an entry, muted unless
+ * `guide.includeInMixdown` is set — so toggling it live works identically
+ * to toggling a Track's mute.
  */
 export function buildCompositeSchedule(
   tracks: Track[],
-  levels: Map<TrackId, number>
+  guide: Guide | null,
+  levels: Map<TrackId | "guide", number>
 ): PlaybackSchedule {
   const inputs: ScheduleInput[] = tracks
     .filter((track) => track.selectedTakeId)
@@ -132,25 +136,44 @@ export function buildCompositeSchedule(
         muted: !isTrackAudible(tracks, track),
       };
     });
+  if (guide) {
+    inputs.push({
+      takeId: "guide",
+      mediaRef: guide.mediaRef,
+      offsetMs: 0,
+      volume: levels.get("guide") ?? 1,
+      muted: !guide.includeInMixdown,
+    });
+  }
   return computePlaybackSchedule(inputs);
 }
 
 /**
- * Per-Take volume/muted values for all Tracks with a selected Take,
- * reflecting current mute/solo and Monitor Mix levels — the live update to
- * push to an already-playing composite schedule via `PlaybackAdapter.updateMix`.
+ * Per-Take volume/muted values for all Tracks with a selected Take, plus the
+ * Guide if present, reflecting current mute/solo, `includeInMixdown`, and
+ * Monitor Mix levels — the live update to push to an already-playing
+ * composite schedule via `PlaybackAdapter.updateMix`.
  */
 export function buildMixUpdates(
   tracks: Track[],
-  levels: Map<TrackId, number>
+  guide: Guide | null,
+  levels: Map<TrackId | "guide", number>
 ): PlaybackMixUpdate[] {
-  return tracks
+  const updates: PlaybackMixUpdate[] = tracks
     .filter((track) => track.selectedTakeId)
     .map((track) => ({
       takeId: track.selectedTakeId!,
       volume: levels.get(track.id) ?? 1,
       muted: !isTrackAudible(tracks, track),
     }));
+  if (guide) {
+    updates.push({
+      takeId: "guide",
+      volume: levels.get("guide") ?? 1,
+      muted: !guide.includeInMixdown,
+    });
+  }
+  return updates;
 }
 
 /** One Track's position within a simple static video grid Layout. */

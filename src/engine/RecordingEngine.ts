@@ -1,6 +1,7 @@
 import type { CaptureAdapter, CaptureHandle, PlaybackAdapter, PlaybackHandle } from "./adapters";
 import type { EngineStatus, Guide, Project, Take, TakeId, Track, TrackId } from "./types";
 import { buildCompositeSchedule, buildMixUpdates, buildMonitorMixSchedule } from "./scheduling";
+import type { ProjectSnapshot } from "../persistence/types";
 
 let idCounter = 0;
 function nextId(prefix: string): string {
@@ -28,16 +29,41 @@ export class RecordingEngine {
   ) {}
 
   createProject(name: string): Project {
-    this.project = { name, tracks: [], guide: null };
+    this.project = { id: nextId("project"), name, createdAt: Date.now(), tracks: [], guide: null };
     return this.project;
   }
 
   /** Imports reference audio as the Project's Guide, replacing any existing one. */
   importGuide(mediaRef: string): Guide {
     const project = this.requireProject();
-    const guide: Guide = { mediaRef };
+    const guide: Guide = { mediaRef, includeInMonitorMix: true, includeInMixdown: false };
     project.guide = guide;
     return guide;
+  }
+
+  /** Sets whether the Guide is audible in the Monitor Mix on the next recording. */
+  setGuideIncludeInMonitorMix(include: boolean): void {
+    const guide = this.requireGuide();
+    guide.includeInMonitorMix = include;
+  }
+
+  /**
+   * Sets whether the Guide is included in composite playback and exported
+   * Mixdowns. Like mute/solo, the Guide is always present as a schedule
+   * entry (muted or not) rather than added/removed, so this pushes a live
+   * mix update to already-playing composite playback instead of restarting.
+   */
+  setGuideIncludeInMixdown(include: boolean): void {
+    const project = this.requireProject();
+    const guide = this.requireGuide();
+    guide.includeInMixdown = include;
+
+    if (this.status === "playing" && this.activePlaybackHandle) {
+      this.playback.updateMix(
+        this.activePlaybackHandle,
+        buildMixUpdates(project.tracks, project.guide, this.monitorMix)
+      );
+    }
   }
 
   getActiveProject(): Project | null {
@@ -134,7 +160,7 @@ export class RecordingEngine {
     if (this.status === "playing" && this.activePlaybackHandle) {
       const project = this.requireProject();
       await this.playback.stop(this.activePlaybackHandle);
-      const schedule = buildCompositeSchedule(project.tracks, this.monitorMix);
+      const schedule = buildCompositeSchedule(project.tracks, project.guide, this.monitorMix);
       this.activePlaybackHandle = await this.playback.play(schedule);
     }
   }
@@ -148,7 +174,7 @@ export class RecordingEngine {
       const project = this.requireProject();
       this.playback.updateMix(
         this.activePlaybackHandle,
-        buildMixUpdates(project.tracks, this.monitorMix)
+        buildMixUpdates(project.tracks, project.guide, this.monitorMix)
       );
     }
   }
@@ -166,7 +192,7 @@ export class RecordingEngine {
       throw new Error(`Cannot start playback while ${this.status}`);
     }
     const project = this.requireProject();
-    const schedule = buildCompositeSchedule(project.tracks, this.monitorMix);
+    const schedule = buildCompositeSchedule(project.tracks, project.guide, this.monitorMix);
 
     this.activePlaybackHandle = await this.playback.play(schedule);
     this.status = "playing";
@@ -178,6 +204,40 @@ export class RecordingEngine {
       this.activePlaybackHandle = null;
     }
     this.status = "idle";
+  }
+
+  /** Serializes the active Project's full state (Tracks, Takes, Guide, Monitor Mix) for persistence. */
+  exportSnapshot(): ProjectSnapshot {
+    const project = this.requireProject();
+    return {
+      id: project.id,
+      name: project.name,
+      createdAt: project.createdAt,
+      tracks: project.tracks,
+      guide: project.guide,
+      monitorMix: Array.from(this.monitorMix.entries()).map(([targetId, level]) => ({
+        targetId,
+        level,
+      })),
+    };
+  }
+
+  /**
+   * Restores a previously exported Project snapshot as the active Project.
+   * Requires the caller (idle) — cannot be loaded mid-recording/playback.
+   */
+  loadSnapshot(snapshot: ProjectSnapshot): void {
+    if (this.status !== "idle") {
+      throw new Error(`Cannot load a Project while ${this.status}`);
+    }
+    this.project = {
+      id: snapshot.id,
+      name: snapshot.name,
+      createdAt: snapshot.createdAt,
+      tracks: snapshot.tracks,
+      guide: snapshot.guide,
+    };
+    this.monitorMix = new Map(snapshot.monitorMix.map((m) => [m.targetId, m.level]));
   }
 
   private createTrack(project: Project): Track {
@@ -196,6 +256,12 @@ export class RecordingEngine {
   private requireProject(): Project {
     if (!this.project) throw new Error("No active Project");
     return this.project;
+  }
+
+  private requireGuide(): Guide {
+    const guide = this.requireProject().guide;
+    if (!guide) throw new Error("No Guide imported");
+    return guide;
   }
 
   private requireTrack(trackId: TrackId): Track {

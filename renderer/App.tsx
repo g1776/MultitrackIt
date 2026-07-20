@@ -4,6 +4,10 @@ import { BrowserCaptureAdapter, BrowserPlaybackAdapter } from "../src/adapters/b
 import { computeGridLayout } from "../src/engine/scheduling";
 import type { Project, Track } from "../src/engine/types";
 import { generateMetronomeGuideAudio } from "../src/adapters/metronomeAudio";
+import { ElectronProjectStorageAdapter } from "../src/adapters/electronStorageAdapter";
+import { createBlobUrlMediaRef, fetchBlobUrlMedia } from "../src/adapters/mediaCodec";
+import { prepareSnapshotForSave, rehydrateSnapshot } from "../src/persistence/projectPersistence";
+import type { ProjectSummary, ProjectStorageAdapter } from "../src/persistence/types";
 
 // Fixed rather than user-configurable: long enough to cover most songs, and
 // simpler than asking the user to guess a duration before they've recorded
@@ -146,6 +150,7 @@ export function App() {
     () => new RecordingEngine(new BrowserCaptureAdapter(), new BrowserPlaybackAdapter()),
     []
   );
+  const storage: ProjectStorageAdapter = useMemo(() => new ElectronProjectStorageAdapter(), []);
 
   const [projectName, setProjectName] = useState("");
   const [project, setProject] = useState<Project | null>(null);
@@ -156,6 +161,8 @@ export function App() {
   const [monitorMixLevels, setMonitorMixLevels] = useState<Record<string, number>>({});
   const [metronomeBpm, setMetronomeBpm] = useState(120);
   const [metronomeBeatsPerBar, setMetronomeBeatsPerBar] = useState(4);
+  const [savedProjects, setSavedProjects] = useState<ProjectSummary[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
 
   function refreshProject() {
     const activeProject = engine.getActiveProject();
@@ -168,10 +175,57 @@ export function App() {
     };
   }, [engine]);
 
+  useEffect(() => {
+    void refreshSavedProjects();
+  }, []);
+
+  async function refreshSavedProjects() {
+    try {
+      setSavedProjects(await storage.listProjects());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   function handleCreateProject() {
     if (!projectName.trim()) return;
     engine.createProject(projectName.trim());
+    setMonitorMixLevels({});
     refreshProject();
+  }
+
+  async function handleSaveProject() {
+    setError(null);
+    setIsSaving(true);
+    try {
+      const snapshot = engine.exportSnapshot();
+      const prepared = await prepareSnapshotForSave(snapshot, fetchBlobUrlMedia);
+      await storage.saveProject(prepared.snapshot, prepared.media);
+      await refreshSavedProjects();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleLoadProject(id: string) {
+    setError(null);
+    try {
+      if (engine.getStatus() !== "idle") await engine.stop();
+      const saved = await storage.loadProject(id);
+      if (!saved) throw new Error(`Project ${id} not found`);
+      const snapshot = rehydrateSnapshot(saved, createBlobUrlMediaRef);
+      engine.loadSnapshot(snapshot);
+      setMonitorMixLevels(
+        Object.fromEntries(snapshot.monitorMix.map((m) => [m.targetId, m.level]))
+      );
+      setIsRecording(false);
+      setIsPlaying(false);
+      refreshProject();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
 
   async function handleRecordToggle(trackId?: string) {
@@ -238,6 +292,26 @@ export function App() {
     }
   }
 
+  function handleGuideIncludeInMonitorMixChange(include: boolean) {
+    setError(null);
+    try {
+      engine.setGuideIncludeInMonitorMix(include);
+      refreshProject();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  function handleGuideIncludeInMixdownChange(include: boolean) {
+    setError(null);
+    try {
+      engine.setGuideIncludeInMixdown(include);
+      refreshProject();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   function handleMonitorMixChange(targetId: string, level: number) {
     engine.setMonitorMixLevel(targetId, level);
     setMonitorMixLevels((prev) => ({ ...prev, [targetId]: level }));
@@ -294,12 +368,26 @@ export function App() {
             onChange={(e) => setProjectName(e.target.value)}
           />
           <button onClick={handleCreateProject}>Create Project</button>
+
+          {savedProjects.length > 0 && (
+            <ul>
+              {savedProjects.map((p) => (
+                <li key={p.id}>
+                  {p.name}{" "}
+                  <button onClick={() => handleLoadProject(p.id)}>Open</button>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 
       {project && (
         <section>
           <h2>{project.name}</h2>
+          <button onClick={handleSaveProject} disabled={isSaving}>
+            {isSaving ? "Saving…" : "Save Project"}
+          </button>
           <button
             onClick={() => handleRecordToggle(undefined)}
             disabled={isRecording && recordingTrackId !== undefined}
@@ -340,7 +428,25 @@ export function App() {
             />
             {project.guide && (
               <>
-                {" "}(Guide imported, excluded from composite playback)
+                {" (Guide imported) "}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={project.guide.includeInMonitorMix}
+                    onChange={(e) => handleGuideIncludeInMonitorMixChange(e.target.checked)}
+                    aria-label="Include Guide in Monitor Mix"
+                  />{" "}
+                  Include in Monitor Mix
+                </label>{" "}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={project.guide.includeInMixdown}
+                    onChange={(e) => handleGuideIncludeInMixdownChange(e.target.checked)}
+                    aria-label="Include Guide in Mixdown"
+                  />{" "}
+                  Include in Mixdown
+                </label>
                 <MonitorMixVolumeSlider
                   label="Guide"
                   volume={monitorMixLevels["guide"] ?? 1}

@@ -364,7 +364,11 @@ describe("RecordingEngine", () => {
       const guide = engine.importGuide("guide-media-ref");
 
       expect(guide.mediaRef).toBe("guide-media-ref");
-      expect(engine.getActiveProject()!.guide).toEqual({ mediaRef: "guide-media-ref" });
+      expect(engine.getActiveProject()!.guide).toEqual({
+        mediaRef: "guide-media-ref",
+        includeInMonitorMix: true,
+        includeInMixdown: false,
+      });
       expect(engine.getActiveProject()!.tracks).toEqual([]);
     });
 
@@ -374,7 +378,11 @@ describe("RecordingEngine", () => {
 
       engine.importGuide("second-guide");
 
-      expect(engine.getActiveProject()!.guide).toEqual({ mediaRef: "second-guide" });
+      expect(engine.getActiveProject()!.guide).toEqual({
+        mediaRef: "second-guide",
+        includeInMonitorMix: true,
+        includeInMixdown: false,
+      });
     });
 
     it("throws when importing a Guide with no active Project", () => {
@@ -397,7 +405,7 @@ describe("RecordingEngine", () => {
       ]);
     });
 
-    it("excludes the Guide from composite playback by default", async () => {
+    it("includes the Guide in composite playback as a muted entry by default (excluded from Mixdown)", async () => {
       engine.createProject("My Song");
       engine.importGuide("guide-media-ref");
       await engine.recordTake(undefined);
@@ -406,7 +414,89 @@ describe("RecordingEngine", () => {
       await engine.play();
 
       const schedule = playback.playedSchedules[playback.playedSchedules.length - 1];
-      expect(schedule.entries.some((e) => e.takeId === "guide")).toBe(false);
+      const guideEntry = schedule.entries.find((e) => e.takeId === "guide");
+      expect(guideEntry?.muted).toBe(true);
+    });
+
+    it("excludes the Guide from the Monitor Mix when includeInMonitorMix is turned off", async () => {
+      engine.createProject("My Song");
+      engine.importGuide("guide-media-ref");
+      engine.setGuideIncludeInMonitorMix(false);
+
+      await engine.recordTake(undefined);
+
+      expect(playback.playedSchedules).toHaveLength(0);
+    });
+
+    it("includes the Guide, unmuted, in composite playback once includeInMixdown is turned on", async () => {
+      engine.createProject("My Song");
+      engine.importGuide("guide-media-ref");
+      await engine.recordTake(undefined);
+      await engine.stopRecording();
+
+      engine.setGuideIncludeInMixdown(true);
+      await engine.play();
+
+      const schedule = playback.playedSchedules[playback.playedSchedules.length - 1];
+      const guideEntry = schedule.entries.find((e) => e.takeId === "guide");
+      expect(guideEntry?.muted).toBe(false);
+    });
+
+    it("pushes a live mix update for the Guide when includeInMixdown changes while already playing", async () => {
+      engine.createProject("My Song");
+      engine.importGuide("guide-media-ref");
+      await engine.recordTake(undefined);
+      await engine.stopRecording();
+      await engine.play();
+
+      engine.setGuideIncludeInMixdown(true);
+
+      expect(playback.mixUpdates).toHaveLength(1);
+      const { updates } = playback.mixUpdates[0];
+      expect(updates.find((u) => u.takeId === "guide")).toEqual({
+        takeId: "guide",
+        volume: 1,
+        muted: false,
+      });
+    });
+
+    it("throws when toggling Guide flags with no Guide imported", () => {
+      engine.createProject("My Song");
+      expect(() => engine.setGuideIncludeInMonitorMix(true)).toThrow();
+      expect(() => engine.setGuideIncludeInMixdown(true)).toThrow();
+    });
+  });
+
+  describe("exportSnapshot / loadSnapshot", () => {
+    it("round-trips a Project's Tracks, Takes, Guide, and Monitor Mix levels", async () => {
+      engine.createProject("My Song");
+      engine.importGuide("guide-media-ref");
+      engine.setMonitorMixLevel("guide", 0.5);
+      await engine.recordTake(undefined);
+      await engine.stopRecording();
+      const trackId = engine.getActiveProject()!.tracks[0].id;
+      engine.setMonitorMixLevel(trackId, 0.8);
+
+      const snapshot = engine.exportSnapshot();
+
+      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter());
+      freshEngine.loadSnapshot(snapshot);
+
+      const project = freshEngine.getActiveProject()!;
+      expect(project.id).toBe(snapshot.id);
+      expect(project.name).toBe("My Song");
+      expect(project.tracks).toEqual(engine.getActiveProject()!.tracks);
+      expect(project.guide).toEqual(engine.getActiveProject()!.guide);
+      expect(freshEngine.getMonitorMixLevel("guide")).toBe(0.5);
+      expect(freshEngine.getMonitorMixLevel(trackId)).toBe(0.8);
+    });
+
+    it("throws when loading a snapshot while recording or playing", async () => {
+      engine.createProject("My Song");
+      const snapshot = engine.exportSnapshot();
+      await engine.recordTake(undefined);
+
+      expect(() => engine.loadSnapshot(snapshot)).toThrow();
     });
   });
 });

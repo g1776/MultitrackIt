@@ -157,7 +157,7 @@ describe("buildMonitorMixSchedule", () => {
   });
 
   it("includes the Guide at its Monitor Mix level, starting at 0", () => {
-    const guide: Guide = { mediaRef: "guide-media" };
+    const guide: Guide = { mediaRef: "guide-media", includeInMonitorMix: true, includeInMixdown: false };
     const schedule = buildMonitorMixSchedule(
       [],
       guide,
@@ -170,13 +170,13 @@ describe("buildMonitorMixSchedule", () => {
   });
 
   it("defaults the Guide's Monitor Mix volume to 1 when no level is set", () => {
-    const guide: Guide = { mediaRef: "guide-media" };
+    const guide: Guide = { mediaRef: "guide-media", includeInMonitorMix: true, includeInMixdown: false };
     const schedule = buildMonitorMixSchedule([], guide, new Map(), undefined);
     expect(schedule.entries[0].volume).toBe(1);
   });
 
   it("syncs the Guide alongside Track Takes, sharing the same negative-offset shift", () => {
-    const guide: Guide = { mediaRef: "guide-media" };
+    const guide: Guide = { mediaRef: "guide-media", includeInMonitorMix: true, includeInMixdown: false };
     const trackA = makeTrack({
       id: "a",
       takes: [take("take-a", "a", -100)],
@@ -187,6 +187,12 @@ describe("buildMonitorMixSchedule", () => {
       { takeId: "take-a", startAtMs: 0 },
       { takeId: "guide", startAtMs: 100 },
     ]);
+  });
+
+  it("excludes the Guide when includeInMonitorMix is false", () => {
+    const guide: Guide = { mediaRef: "guide-media", includeInMonitorMix: false, includeInMixdown: false };
+    const schedule = buildMonitorMixSchedule([], guide, new Map(), undefined);
+    expect(schedule.entries).toEqual([]);
   });
 });
 
@@ -210,13 +216,13 @@ describe("buildCompositeSchedule", () => {
       takes: [take("take-b", "b", -50)],
       selectedTakeId: "take-b",
     });
-    const schedule = buildCompositeSchedule([trackA, trackB], new Map());
+    const schedule = buildCompositeSchedule([trackA, trackB], null, new Map());
     expect(schedule.entries.map((e) => e.takeId)).toEqual(["take-a", "take-b"]);
     expect(schedule.entries.map((e) => e.startAtMs)).toEqual([100, 0]);
   });
 
-  it("returns an empty schedule for an empty Track list", () => {
-    expect(buildCompositeSchedule([], new Map())).toEqual({ entries: [] });
+  it("returns an empty schedule for an empty Track list and no Guide", () => {
+    expect(buildCompositeSchedule([], null, new Map())).toEqual({ entries: [] });
   });
 
   it("includes muted/non-soloed Tracks as muted entries rather than omitting them, so playback stays in sync when mute/solo changes later", () => {
@@ -237,11 +243,27 @@ describe("buildCompositeSchedule", () => {
       takes: [take("take-c", "c", 0)],
       selectedTakeId: "take-c",
     });
-    const schedule = buildCompositeSchedule([trackA, trackB, trackC], new Map());
+    const schedule = buildCompositeSchedule([trackA, trackB, trackC], null, new Map());
     expect(schedule.entries.map((e) => ({ takeId: e.takeId, muted: e.muted }))).toEqual([
       { takeId: "take-a", muted: true },
       { takeId: "take-b", muted: false },
       { takeId: "take-c", muted: true },
+    ]);
+  });
+
+  it("includes the Guide as a muted entry by default (excluded from Mixdown)", () => {
+    const guide: Guide = { mediaRef: "guide-media", includeInMonitorMix: true, includeInMixdown: false };
+    const schedule = buildCompositeSchedule([], guide, new Map());
+    expect(schedule.entries).toEqual([
+      { takeId: "guide", mediaRef: "guide-media", startAtMs: 0, volume: 1, muted: true },
+    ]);
+  });
+
+  it("includes the Guide as an unmuted entry when includeInMixdown is set", () => {
+    const guide: Guide = { mediaRef: "guide-media", includeInMonitorMix: true, includeInMixdown: true };
+    const schedule = buildCompositeSchedule([], guide, new Map([["guide", 0.7]]));
+    expect(schedule.entries).toEqual([
+      { takeId: "guide", mediaRef: "guide-media", startAtMs: 0, volume: 0.7, muted: false },
     ]);
   });
 });
@@ -253,6 +275,7 @@ describe("buildMixUpdates", () => {
     const trackC = makeTrack({ id: "c", selectedTakeId: "take-c" });
     const updates = buildMixUpdates(
       [trackA, trackB, trackC],
+      null,
       new Map([["b", 0.5]])
     );
     expect(updates).toEqual([
@@ -264,7 +287,13 @@ describe("buildMixUpdates", () => {
 
   it("skips Tracks with no selected Take", () => {
     const track = makeTrack({ id: "a", selectedTakeId: null });
-    expect(buildMixUpdates([track], new Map())).toEqual([]);
+    expect(buildMixUpdates([track], null, new Map())).toEqual([]);
+  });
+
+  it("includes a Guide update reflecting includeInMixdown", () => {
+    const guide: Guide = { mediaRef: "guide-media", includeInMonitorMix: true, includeInMixdown: true };
+    const updates = buildMixUpdates([], guide, new Map([["guide", 0.9]]));
+    expect(updates).toEqual([{ takeId: "guide", volume: 0.9, muted: false }]);
   });
 });
 
