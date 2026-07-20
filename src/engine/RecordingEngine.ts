@@ -84,30 +84,25 @@ export class RecordingEngine {
       : this.createTrack(project);
 
     this.activeCaptureTrackId = track.id;
+    this.activeCaptureHandle = await this.capture.startCapture();
 
     // Monitor Mix: play back previously recorded Tracks' selected Takes,
     // offset-corrected and in sync, so the performer can record against
-    // them. The Track being recorded onto is excluded.
+    // them. The Track being recorded onto is excluded. Started only once
+    // capture has actually begun (MediaRecorder.start() already called) —
+    // that's the new Take's own t=0, and every monitorSchedule startAtMs is
+    // relative to *this* playback.play() call, so starting it any earlier
+    // (e.g. concurrently with capture) decouples the monitor mix's start
+    // from the moment the Take actually starts recording against it.
     const monitorSchedule = buildMonitorMixSchedule(
       project.tracks,
       project.guide,
       this.monitorMix,
       track.id
     );
-
-    // Started concurrently with capture, not after: capture.startCapture()
-    // (camera/mic permission + MediaRecorder init) commonly takes real
-    // wall-clock time on its own, which otherwise would've been the only
-    // window the monitor Takes had to buffer before their scheduled
-    // playback.play() start fires — sequencing them let capture setup eat
-    // that entire buffering window, leaving audio at the start of a Take
-    // audibly late/stuttering until it caught up.
-    const [captureHandle, monitorHandle] = await Promise.all([
-      this.capture.startCapture(),
-      monitorSchedule.entries.length > 0 ? this.playback.play(monitorSchedule) : Promise.resolve(null),
-    ]);
-    this.activeCaptureHandle = captureHandle;
-    this.activeMonitorPlaybackHandle = monitorHandle;
+    if (monitorSchedule.entries.length > 0) {
+      this.activeMonitorPlaybackHandle = await this.playback.play(monitorSchedule);
+    }
 
     this.status = "recording";
   }
