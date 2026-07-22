@@ -7,6 +7,7 @@ import {
   buildMixUpdates,
   computeGridLayout,
   computeGridDimensions,
+  computeAudioGraphSchedule,
 } from "./scheduling";
 import type { Guide, Track } from "./types";
 
@@ -345,6 +346,34 @@ describe("computeGridLayout", () => {
       { trackId: "a", startAtMs: 0 },
       { trackId: "b", startAtMs: 300 },
     ]);
+  });
+});
+
+describe("computeAudioGraphSchedule", () => {
+  it("returns an empty entries list for an empty schedule, anchored at referenceTime", () => {
+    const graphSchedule = computeAudioGraphSchedule({ entries: [] }, 10);
+    expect(graphSchedule).toEqual({ entries: [], videoAnchorTime: 10 });
+  });
+
+  it("converts each entry's startAtMs (ms) into a contextStartTime (seconds) relative to referenceTime", () => {
+    const schedule = {
+      entries: [
+        { takeId: "t1", mediaRef: "m1", startAtMs: 0, volume: 1, muted: false },
+        { takeId: "t2", mediaRef: "m2", startAtMs: 250, volume: 0.5, muted: true },
+      ],
+    };
+    const graphSchedule = computeAudioGraphSchedule(schedule, 5);
+    expect(graphSchedule.entries).toEqual([
+      { takeId: "t1", mediaRef: "m1", contextStartTime: 5, volume: 1, muted: false },
+      { takeId: "t2", mediaRef: "m2", contextStartTime: 5.25, volume: 0.5, muted: true },
+    ]);
+  });
+
+  it("sets videoAnchorTime to referenceTime, the same zero point every entry's contextStartTime is relative to", () => {
+    const schedule = {
+      entries: [{ takeId: "t1", mediaRef: "m1", startAtMs: 0, volume: 1, muted: false }],
+    };
+    expect(computeAudioGraphSchedule(schedule, 42).videoAnchorTime).toBe(42);
   });
 });
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { computeGridDimensions, computeGridLayout } from "../../src/engine/scheduling";
 import type { Track } from "../../src/engine/types";
 import { useTransportStore } from "../store/useTransportStore";
-import { captureAdapter } from "../store/engine";
+import { captureAdapter, engine, playbackAdapter } from "../store/engine";
 
 function selectedTakeMediaRef(track: Track): string | undefined {
   return track.takes.find((t) => t.id === track.selectedTakeId)?.mediaRef;
@@ -32,16 +32,19 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
   const gridLayout = useMemo(() => computeGridLayout(tracks), [tracks]);
   const gridVideoRefs = useRef(new Map<string, HTMLVideoElement>());
 
-  // Drives each grid cell's <video> off the same startAtMs the audio-only
-  // playback adapter uses, so the visible grid stays offset-corrected and in
-  // sync with the audio instead of every cell naively starting at once. Runs
-  // during recording too (not just composite "Play All Tracks"): the engine
-  // already starts a separate hidden monitor-mix playback for the *audio* of
-  // previously recorded Tracks as soon as recording starts, but that's a
-  // parallel, off-DOM `<video>` element decoupled from the grid's own cells
-  // — without this, the grid's video stayed paused throughout recording.
-  // The Track currently being recorded onto is excluded even if it already
-  // has a cell from an earlier Take (a re-take), since monitoring your own
+  // Drives each grid cell's <video> off the same shared AudioContext clock
+  // the audio-only playback adapter schedules its graph against (via
+  // getVideoAnchor), rather than each cell running its own independent
+  // setTimeout off startAtMs — so the visible grid stays anchored to the
+  // same clock as the audio instead of drifting against it over a session
+  // (ADR 0002; folds in and supersedes #11). Runs during recording too (not
+  // just composite "Play All Tracks"): the engine already starts a separate
+  // hidden monitor-mix playback for the *audio* of previously recorded
+  // Tracks as soon as recording starts, but that's a parallel, off-DOM
+  // `<video>` element decoupled from the grid's own cells — without this,
+  // the grid's video stayed paused throughout recording. The Track
+  // currently being recorded onto is excluded even if it already has a cell
+  // from an earlier Take (a re-take), since monitoring your own
   // about-to-be-replaced previous Take isn't meaningful.
   useEffect(() => {
     if (!isPlaying && !isRecording) {
@@ -52,12 +55,23 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
       return;
     }
 
+    const handle = isRecording
+      ? engine.getActiveMonitorPlaybackHandle()
+      : engine.getActivePlaybackHandle();
+    // The audio-only playback adapter has always already been started by
+    // this point (recordTake/play both await it before the store sets
+    // isRecording/isPlaying), so a missing handle/delay here means there's
+    // nothing to stay in sync with yet — skip rather than fall back to an
+    // independent, un-anchored timer.
+    if (!handle) return;
+
     const timers = gridLayout
       .filter((cell) => cell.trackId !== recordingTrackId)
       .map((cell) => {
         const video = gridVideoRefs.current.get(cell.trackId);
-        if (!video) return undefined;
-        return setTimeout(() => void video.play(), cell.startAtMs);
+        const delayMs = playbackAdapter.getSyncedStartDelayMs(handle, cell.startAtMs);
+        if (!video || delayMs === undefined) return undefined;
+        return setTimeout(() => void video.play(), delayMs);
       });
 
     return () => timers.forEach((timer) => timer && clearTimeout(timer));

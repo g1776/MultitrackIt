@@ -10,6 +10,13 @@ function nextId(prefix: string): string {
 }
 
 /**
+ * Fixed Count-in duration (ms) shown before recording actually captures
+ * audio (see `CONTEXT.md`'s Count-in entry and ADR 0002) — a DAW-style
+ * lead-in, not adaptively measured per-device.
+ */
+export const DEFAULT_COUNT_IN_MS = 3000;
+
+/**
  * Owns Project/Track/Take/Guide state, the Monitor Mix, and playback sync.
  * Depends only on the capture/playback adapter interfaces, never on
  * Electron/OS AV APIs directly.
@@ -25,7 +32,8 @@ export class RecordingEngine {
 
   constructor(
     private readonly capture: CaptureAdapter,
-    private readonly playback: PlaybackAdapter
+    private readonly playback: PlaybackAdapter,
+    private readonly countInMs: number = DEFAULT_COUNT_IN_MS
   ) {}
 
   createProject(name: string): Project {
@@ -74,6 +82,16 @@ export class RecordingEngine {
     return this.status;
   }
 
+  /** The handle for in-progress composite playback, if any — for a caller syncing its own UI (e.g. the video grid) to the same audio graph. */
+  getActivePlaybackHandle(): PlaybackHandle | null {
+    return this.activePlaybackHandle;
+  }
+
+  /** The handle for the in-progress Monitor Mix playback during recording, if any — see `getActivePlaybackHandle`. */
+  getActiveMonitorPlaybackHandle(): PlaybackHandle | null {
+    return this.activeMonitorPlaybackHandle;
+  }
+
   async recordTake(trackId: TrackId | undefined): Promise<void> {
     if (this.status !== "idle") {
       throw new Error(`Cannot start recording while ${this.status}`);
@@ -84,16 +102,15 @@ export class RecordingEngine {
       : this.createTrack(project);
 
     this.activeCaptureTrackId = track.id;
-    this.activeCaptureHandle = await this.capture.startCapture();
 
     // Monitor Mix: play back previously recorded Tracks' selected Takes,
     // offset-corrected and in sync, so the performer can record against
-    // them. The Track being recorded onto is excluded. Started only once
-    // capture has actually begun (MediaRecorder.start() already called) —
-    // that's the new Take's own t=0, and every monitorSchedule startAtMs is
-    // relative to *this* playback.play() call, so starting it any earlier
-    // (e.g. concurrently with capture) decouples the monitor mix's start
-    // from the moment the Take actually starts recording against it.
+    // them. The Track being recorded onto is excluded. Started *before*
+    // capture, priming the shared playback clock during the visible
+    // Count-in, so the new Take's capture start (once the Count-in
+    // elapses) aligns with the same clock the Monitor Mix is already
+    // scheduled against — inverted from starting capture first and having
+    // the Monitor Mix trail it (see Count-in, `CONTEXT.md`, ADR 0002).
     const monitorSchedule = buildMonitorMixSchedule(
       project.tracks,
       project.guide,
@@ -104,7 +121,17 @@ export class RecordingEngine {
       this.activeMonitorPlaybackHandle = await this.playback.play(monitorSchedule);
     }
 
+    this.status = "counting-in";
+    await this.wait(this.countInMs);
+
+    this.activeCaptureHandle = await this.capture.startCapture();
     this.status = "recording";
+  }
+
+  /** Resolves after `ms`, or immediately for `ms <= 0` — lets tests skip the real Count-in delay. */
+  private wait(ms: number): Promise<void> {
+    if (ms <= 0) return Promise.resolve();
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   async stopRecording(): Promise<void> {

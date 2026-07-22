@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { RecordingEngine } from "./RecordingEngine";
 import { FakeCaptureAdapter, FakePlaybackAdapter } from "./fakeAdapters";
 
@@ -10,7 +10,9 @@ describe("RecordingEngine", () => {
   beforeEach(() => {
     capture = new FakeCaptureAdapter();
     playback = new FakePlaybackAdapter();
-    engine = new RecordingEngine(capture, playback);
+    // countInMs: 0 skips the real Count-in delay so these tests run fast;
+    // Count-in sequencing itself is covered separately below.
+    engine = new RecordingEngine(capture, playback, 0);
   });
 
   describe("createProject", () => {
@@ -88,7 +90,7 @@ describe("RecordingEngine", () => {
         startCapture: () => capture.startCapture(),
         stopCapture: (handle) => capture.stopCapture(handle),
       };
-      const bareEngine = new RecordingEngine(noLatencyCapture, playback);
+      const bareEngine = new RecordingEngine(noLatencyCapture, playback, 0);
       bareEngine.createProject("My Song");
       await bareEngine.recordTake(undefined);
 
@@ -316,6 +318,57 @@ describe("RecordingEngine", () => {
       await engine.stopRecording();
 
       expect(playback.stoppedHandles).toHaveLength(1);
+    });
+  });
+
+  describe("Count-in", () => {
+    it("starts Monitor Mix playback before capture, entering counting-in status before capture actually starts", async () => {
+      const freshCapture = new FakeCaptureAdapter();
+      const freshPlayback = new FakePlaybackAdapter();
+      const countInEngine = new RecordingEngine(freshCapture, freshPlayback, 20);
+      countInEngine.createProject("My Song");
+      await countInEngine.recordTake(undefined);
+      await countInEngine.stopRecording();
+
+      const recordPromise = countInEngine.recordTake(undefined);
+      // Yield a couple ticks so recordTake reaches the awaited Count-in delay.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(countInEngine.getStatus()).toBe("counting-in");
+      expect(freshPlayback.playedSchedules).toHaveLength(1); // Monitor Mix already primed/playing
+      expect(freshCapture.startedHandles).toHaveLength(1); // still only the first Take's capture
+
+      await recordPromise;
+
+      expect(countInEngine.getStatus()).toBe("recording");
+      expect(freshCapture.startedHandles).toHaveLength(2);
+    });
+
+    it("resolves recordTake immediately (no counting-in observed) when countInMs is 0", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      expect(engine.getStatus()).toBe("recording");
+    });
+
+    it("does not start capture until after the Count-in elapses", async () => {
+      vi.useFakeTimers();
+      try {
+        const timedEngine = new RecordingEngine(capture, playback, 3000);
+        timedEngine.createProject("My Song");
+
+        const recordPromise = timedEngine.recordTake(undefined);
+        await vi.advanceTimersByTimeAsync(2999);
+        expect(capture.startedHandles).toHaveLength(0);
+        expect(timedEngine.getStatus()).toBe("counting-in");
+
+        await vi.advanceTimersByTimeAsync(1);
+        await recordPromise;
+        expect(capture.startedHandles).toHaveLength(1);
+        expect(timedEngine.getStatus()).toBe("recording");
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

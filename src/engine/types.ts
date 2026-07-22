@@ -42,4 +42,4 @@ export interface MonitorMixLevel {
   level: number;
 }
 
-export type EngineStatus = "idle" | "recording" | "playing";
+export type EngineStatus = "idle" | "counting-in" | "recording" | "playing";

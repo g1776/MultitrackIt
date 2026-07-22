@@ -8,5 +8,6 @@ import type { ProjectStorageAdapter } from "../../src/persistence/types";
 // zustand stores (which import these directly) need a stable reference that
 // exists before any component mounts.
 export const captureAdapter = new BrowserCaptureAdapter();
-export const engine = new RecordingEngine(captureAdapter, new BrowserPlaybackAdapter());
+export const playbackAdapter = new BrowserPlaybackAdapter();
+export const engine = new RecordingEngine(captureAdapter, playbackAdapter);
 export const storage: ProjectStorageAdapter = new ElectronProjectStorageAdapter();

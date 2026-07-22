@@ -1,4 +1,9 @@
-import type { PlaybackMixUpdate, PlaybackSchedule, PlaybackScheduleEntry } from "./adapters";
+import type {
+  AudioGraphSchedule,
+  PlaybackMixUpdate,
+  PlaybackSchedule,
+  PlaybackScheduleEntry,
+} from "./adapters";
 import type { Guide, Track, TrackId } from "./types";
 
 /**
@@ -185,6 +190,34 @@ export function buildMixUpdates(
     });
   }
   return updates;
+}
+
+/**
+ * Translates a `PlaybackSchedule` (each entry's `startAtMs`, relative to
+ * playback start) into `AudioContext` clock terms, relative to
+ * `referenceTime` (an `AudioContext.currentTime` reading), so a real
+ * `PlaybackAdapter` can schedule every Take/Guide off one shared graph
+ * clock instead of independent element timers. `videoAnchorTime` is that
+ * same `referenceTime` — the zero point a caller anchoring separate video
+ * elements (e.g. the video grid) should start its own `startAtMs`-relative
+ * timing from, so audio and video share one clock.
+ *
+ * Pure: no `AudioContext` is created or read here, only `referenceTime` is
+ * taken as an input, so this stays unit-testable per the originating spec
+ * without a real `AudioContext`.
+ */
+export function computeAudioGraphSchedule(
+  schedule: PlaybackSchedule,
+  referenceTime: number
+): AudioGraphSchedule {
+  const entries = schedule.entries.map((entry) => ({
+    takeId: entry.takeId,
+    mediaRef: entry.mediaRef,
+    contextStartTime: referenceTime + entry.startAtMs / 1000,
+    volume: entry.volume,
+    muted: entry.muted,
+  }));
+  return { entries, videoAnchorTime: referenceTime };
 }
 
 /**

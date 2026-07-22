@@ -59,3 +59,31 @@ export interface PlaybackMixUpdate {
 export interface PlaybackHandle {
   id: string;
 }
+
+/**
+ * A `PlaybackSchedule` translated into `AudioContext` clock terms: each
+ * entry's start time and a shared video-anchor timestamp, all relative to
+ * the same `AudioContext.currentTime` reference — the seam a real
+ * `PlaybackAdapter` implementation uses to schedule a shared audio graph
+ * instead of independent per-element timers (see ADR 0002).
+ */
+export interface AudioGraphSchedule {
+  entries: AudioGraphScheduleEntry[];
+  /**
+   * The `AudioContext`-clock timestamp (seconds) corresponding to
+   * `startAtMs: 0` — the same zero point every entry's `contextStartTime`
+   * is relative to. A caller driving separate video elements in sync with
+   * this audio graph (e.g. a video grid) anchors its own start times off
+   * this same timestamp.
+   */
+  videoAnchorTime: number;
+}
+
+export interface AudioGraphScheduleEntry {
+  takeId: TakeId;
+  mediaRef: string;
+  /** `AudioContext.currentTime`-relative time (seconds) this Take/Guide should start at. */
+  contextStartTime: number;
+  volume: number;
+  muted: boolean;
+}

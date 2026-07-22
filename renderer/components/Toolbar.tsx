@@ -1,5 +1,6 @@
 import { useProjectStore } from "../store/useProjectStore";
 import { useTransportStore } from "../store/useTransportStore";
+import { CountIn } from "./CountIn";
 
 export function Toolbar({ projectName, hasAnyRecordedTake }: { projectName: string; hasAnyRecordedTake: boolean }) {
   const saveProject = useProjectStore((s) => s.saveProject);
@@ -7,6 +8,7 @@ export function Toolbar({ projectName, hasAnyRecordedTake }: { projectName: stri
   const trackCount = useProjectStore((s) => s.project?.tracks.length ?? 0);
 
   const isRecording = useTransportStore((s) => s.isRecording);
+  const isCountingIn = useTransportStore((s) => s.isCountingIn);
   const isPlaying = useTransportStore((s) => s.isPlaying);
   const recordingTrackId = useTransportStore((s) => s.recordingTrackId);
   const recordToggle = useTransportStore((s) => s.recordToggle);
@@ -20,15 +22,17 @@ export function Toolbar({ projectName, hasAnyRecordedTake }: { projectName: stri
       </button>
       <button
         onClick={() => void recordToggle(undefined)}
-        disabled={isRecording && recordingTrackId !== undefined}
+        disabled={isCountingIn || (isRecording && recordingTrackId !== undefined)}
       >
         {isRecording && recordingTrackId === undefined ? "Stop Recording" : "Record New Track"}
       </button>
       {hasAnyRecordedTake && (
-        <button onClick={() => void playToggle()} disabled={isRecording}>
+        <button onClick={() => void playToggle()} disabled={isRecording || isCountingIn}>
           {isPlaying ? "Stop" : "Play All Tracks"}
         </button>
       )}
+
+      {isCountingIn && <CountIn />}
 
       {isRecording && trackCount > 1 && (
         <p>Monitoring {trackCount - 1} previously recorded Track(s) in sync while you record.</p>
