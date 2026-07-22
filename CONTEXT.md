@@ -25,3 +25,6 @@ The visual arrangement of Track video feeds in the output grid — one position/
 
 **Offset**
 A signed time value stored per Take that shifts its playback position relative to the Project timeline, correcting for recording/monitoring latency so it lines up with other Tracks and the Guide.
+
+**Count-in**
+A fixed-duration, visible lead-in shown before recording actually captures audio, giving the shared playback clock time to prime so the Monitor Mix (previously recorded Tracks + Guide) starts in sync with the new Take. Distinct from Offset: Offset corrects where a Take starts once recorded; Count-in exists to let the engine reach a synced-and-ready state before recording begins.
