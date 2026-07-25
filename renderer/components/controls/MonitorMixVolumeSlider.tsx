@@ -8,7 +8,7 @@ export function MonitorMixVolumeSlider({
   onChange: (volume: number) => void;
 }) {
   return (
-    <label style={{ display: "inline-flex", alignItems: "center", gap: 4, marginLeft: 8 }}>
+    <label>
       Monitor Mix ({label}):
       <input
         type="range"

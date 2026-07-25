@@ -17,25 +17,27 @@ export function Toolbar({ projectName, hasAnyRecordedTake }: { projectName: stri
   return (
     <>
       <h2>{projectName}</h2>
-      <button onClick={() => void saveProject()} disabled={isSaving}>
-        {isSaving ? "Saving…" : "Save Project"}
-      </button>
-      <button
-        onClick={() => void recordToggle(undefined)}
-        disabled={isCountingIn || (isRecording && recordingTrackId !== undefined)}
-      >
-        {isRecording && recordingTrackId === undefined ? "Stop Recording" : "Record New Track"}
-      </button>
-      {hasAnyRecordedTake && (
-        <button onClick={() => void playToggle()} disabled={isRecording || isCountingIn}>
-          {isPlaying ? "Stop" : "Play All Tracks"}
+      <div className="panel">
+        <button onClick={() => void saveProject()} disabled={isSaving}>
+          {isSaving ? "Saving…" : "Save Project"}
         </button>
-      )}
+        <button
+          onClick={() => void recordToggle(undefined)}
+          disabled={isCountingIn || (isRecording && recordingTrackId !== undefined)}
+        >
+          {isRecording && recordingTrackId === undefined ? "Stop Recording" : "Record New Track"}
+        </button>
+        {hasAnyRecordedTake && (
+          <button onClick={() => void playToggle()} disabled={isRecording || isCountingIn}>
+            {isPlaying ? "Stop" : "Play All Tracks"}
+          </button>
+        )}
+      </div>
 
       {isCountingIn && <CountIn />}
 
       {isRecording && trackCount > 1 && (
-        <p>Monitoring {trackCount - 1} previously recorded Track(s) in sync while you record.</p>
+        <p className="hint">Monitoring {trackCount - 1} previously recorded Track(s) in sync while you record.</p>
       )}
     </>
   );

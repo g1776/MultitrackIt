@@ -9,15 +9,18 @@ export function ProjectPicker() {
 
   return (
     <section>
-      <input
-        placeholder="Project name"
-        value={projectName}
-        onChange={(e) => setProjectName(e.target.value)}
-      />
-      <button onClick={() => createProject(projectName)}>Create Project</button>
+      <div className="panel">
+        <input
+          className="input-name"
+          placeholder="Project name"
+          value={projectName}
+          onChange={(e) => setProjectName(e.target.value)}
+        />
+        <button onClick={() => createProject(projectName)}>Create Project</button>
+      </div>
 
       {savedProjects.length > 0 && (
-        <ul>
+        <ul className="project-list">
           {savedProjects.map((p) => (
             <li key={p.id}>
               {p.name} <button onClick={() => void loadProject(p.id)}>Open</button>

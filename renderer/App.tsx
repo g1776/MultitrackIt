@@ -26,7 +26,7 @@ export function App() {
   const hasAnyRecordedTake = tracks.some((t) => t.selectedTakeId);
 
   return (
-    <main style={{ fontFamily: "sans-serif", padding: 24, maxWidth: 720 }}>
+    <main>
       <h1>MultitrackIt</h1>
 
       {!project && <ProjectPicker />}
@@ -40,7 +40,7 @@ export function App() {
         </section>
       )}
 
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      {error && <p className="error">{error}</p>}
     </main>
   );
 }

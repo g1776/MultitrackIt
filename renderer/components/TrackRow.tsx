@@ -20,11 +20,15 @@ export function TrackRow({ track }: { track: Track }) {
   const selectedTake = track.takes.find((t) => t.id === track.selectedTakeId);
 
   return (
-    <li>
-      <TrackNameInput name={track.name} onRename={(name) => renameTrack(track.id, name)} />: {track.takes.length}{" "}
-      take(s)
-      {track.mute ? " (muted)" : ""}
-      {track.solo ? " (solo)" : ""}
+    <li className="track-row">
+      <span className="track-row__name">
+        <TrackNameInput name={track.name} onRename={(name) => renameTrack(track.id, name)} />
+      </span>
+      <span className="value">
+        {track.takes.length} Take(s)
+        {track.mute ? " (muted)" : ""}
+        {track.solo ? " (solo)" : ""}
+      </span>
       <button
         onClick={() => setTrackMuteSolo(track.id, { mute: !track.mute })}
         aria-pressed={track.mute}

@@ -110,12 +110,13 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
 
   return (
     <div
+      className="video-grid"
+      // Computed layout, not cosmetics: the grid's shape depends on the cell
+      // count, so it (and each cell's position below) stays inline while the
+      // cosmetic rules live in global.css.
       style={{
-        display: "grid",
         gridTemplateColumns: `repeat(${renderCols}, 1fr)`,
         gridTemplateRows: `repeat(${renderRows}, 1fr)`,
-        gap: 8,
-        marginTop: 16,
       }}
     >
       {gridLayout.map((cell, index) => {
@@ -124,11 +125,10 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
         return (
           <div
             key={cell.trackId}
+            className="video-grid__cell"
             style={{
               gridRow: Math.floor(index / renderCols) + 1,
               gridColumn: (index % renderCols) + 1,
-              background: "#000",
-              aspectRatio: "16 / 9",
             }}
           >
             {mediaRef && (
@@ -141,7 +141,6 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
                 src={mediaRef}
                 muted
                 playsInline
-                style={{ width: "100%", height: "100%" }}
               />
             )}
           </div>
@@ -153,15 +152,14 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
           return (
             <div
               key="live-preview"
+              className="video-grid__cell"
               style={{
                 gridRow: Math.floor(index / renderCols) + 1,
                 gridColumn: (index % renderCols) + 1,
-                background: "#000",
-                aspectRatio: "16 / 9",
               }}
             >
               {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-              <video ref={livePreviewVideoRef} muted playsInline autoPlay style={{ width: "100%", height: "100%" }} />
+              <video ref={livePreviewVideoRef} muted playsInline autoPlay />
             </div>
           );
         })()}

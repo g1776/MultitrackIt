@@ -12,7 +12,7 @@ export function MetronomeGuideControls({
   onGenerate: () => void;
 }) {
   return (
-    <>
+    <span className="control-group">
       <label>
         BPM:{" "}
         <input
@@ -22,9 +22,9 @@ export function MetronomeGuideControls({
           value={bpm}
           onChange={(e) => onBpmChange(Number(e.target.value))}
           aria-label="Metronome BPM"
-          style={{ width: 60 }}
+          className="input-numeric"
         />
-      </label>{" "}
+      </label>
       <label>
         Beats per bar:{" "}
         <select
@@ -38,8 +38,8 @@ export function MetronomeGuideControls({
             </option>
           ))}
         </select>
-      </label>{" "}
+      </label>
       <button onClick={onGenerate}>Generate Metronome Guide</button>
-    </>
+    </span>
   );
 }

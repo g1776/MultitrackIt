@@ -24,7 +24,7 @@ export function CountIn() {
   const remainingSeconds = Math.ceil(remainingMs / 1000);
 
   return (
-    <p role="status" style={{ fontWeight: "bold" }}>
+    <p role="status" className="status">
       Recording starts in {remainingSeconds}…
     </p>
   );

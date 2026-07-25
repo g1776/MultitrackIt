@@ -17,7 +17,7 @@ export function TrackNameInput({ name, onRename }: { name: string; onRename: (na
       onBlur={commit}
       onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
       aria-label={`Rename ${name}`}
-      style={{ width: 120 }}
+      className="input-name"
     />
   );
 }

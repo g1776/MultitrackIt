@@ -30,47 +30,50 @@ export function GuideSection() {
   }
 
   return (
-    <section style={{ marginTop: 8 }}>
-      <label>
-        Guide (backing track / click):{" "}
-        <input
-          type="file"
-          accept="audio/*"
-          aria-label="Import Guide"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) importGuide(URL.createObjectURL(file));
-            e.target.value = "";
-          }}
+    <section>
+      <h3>Guide</h3>
+      <div className="panel">
+        <label>
+          Guide (backing track / click):
+          <input
+            type="file"
+            accept="audio/*"
+            aria-label="Import Guide"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) importGuide(URL.createObjectURL(file));
+              e.target.value = "";
+            }}
+          />
+        </label>
+        <span className="hint">or</span>
+        <MetronomeGuideControls
+          bpm={metronomeBpm}
+          beatsPerBar={metronomeBeatsPerBar}
+          onBpmChange={setMetronomeBpm}
+          onBeatsPerBarChange={setMetronomeBeatsPerBar}
+          onGenerate={handleGenerateMetronomeGuide}
         />
-      </label>
-      {" or "}
-      <MetronomeGuideControls
-        bpm={metronomeBpm}
-        beatsPerBar={metronomeBeatsPerBar}
-        onBpmChange={setMetronomeBpm}
-        onBeatsPerBarChange={setMetronomeBeatsPerBar}
-        onGenerate={handleGenerateMetronomeGuide}
-      />
+      </div>
       {guide && (
-        <>
-          {" (Guide imported) "}
+        <div className="panel">
+          <span className="value">Guide imported</span>
           <label>
             <input
               type="checkbox"
               checked={guide.includeInMonitorMix}
               onChange={(e) => setGuideIncludeInMonitorMix(e.target.checked)}
               aria-label="Include Guide in Monitor Mix"
-            />{" "}
+            />
             Include in Monitor Mix
-          </label>{" "}
+          </label>
           <label>
             <input
               type="checkbox"
               checked={guide.includeInMixdown}
               onChange={(e) => setGuideIncludeInMixdown(e.target.checked)}
               aria-label="Include Guide in Mixdown"
-            />{" "}
+            />
             Include in Mixdown
           </label>
           <MonitorMixVolumeSlider
@@ -78,7 +81,7 @@ export function GuideSection() {
             volume={monitorMixLevels["guide"] ?? 1}
             onChange={(level) => setMonitorMixLevel("guide", level)}
           />
-        </>
+        </div>
       )}
     </section>
   );

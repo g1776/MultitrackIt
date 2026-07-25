@@ -18,7 +18,7 @@ export function TakeOffsetInput({
   }
 
   return (
-    <label style={{ marginLeft: 8 }}>
+    <label>
       Offset (ms):{" "}
       <input
         type="number"
@@ -28,7 +28,7 @@ export function TakeOffsetInput({
         onBlur={commit}
         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         aria-label="Take Offset in milliseconds"
-        style={{ width: 80 }}
+        className="input-numeric"
       />
     </label>
   );
