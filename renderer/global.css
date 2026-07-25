@@ -230,15 +230,6 @@ section {
   border-top: var(--border);
 }
 
-/* Controls that belong together within a panel (e.g. BPM + beats per bar +
-   generate) — tighter spacing than between groups. */
-.control-group {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 .track-list {
   list-style: none;
   margin: 0;

@@ -4,6 +4,7 @@ import { useProjectStore } from "./store/useProjectStore";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { Toolbar } from "./components/Toolbar";
 import { GuideSection } from "./components/GuideSection";
+import { TempoControls } from "./components/controls/TempoControls";
 import { TrackList } from "./components/TrackList";
 import { VideoGrid } from "./components/VideoGrid";
 
@@ -41,6 +42,7 @@ export function App() {
         {project && (
           <>
             <Toolbar projectName={project.name} hasAnyRecordedTake={hasAnyRecordedTake} />
+            <TempoControls />
             <GuideSection />
             <TrackList tracks={tracks} />
           </>

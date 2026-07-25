@@ -20,6 +20,7 @@ interface ProjectState {
   loadProject: (id: string) => Promise<void>;
   renameTrack: (trackId: string, name: string) => void;
   selectTake: (trackId: string, takeId: string) => void;
+  setTempo: (changes: { bpm?: number; beatsPerBar?: number }) => void;
   importGuide: (mediaRef: string) => void;
   setGuideIncludeInMonitorMix: (include: boolean) => void;
   setGuideIncludeInMixdown: (include: boolean) => void;
@@ -116,6 +117,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   selectTake: (trackId, takeId) => guarded(set, () => engine.selectTake(trackId, takeId)),
+
+  setTempo: (changes) => guarded(set, () => engine.setTempo(changes)),
 
   importGuide: (mediaRef) => guarded(set, () => engine.importGuide(mediaRef)),
 

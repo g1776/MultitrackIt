@@ -14,6 +14,13 @@ export interface ProjectSnapshot {
   tracks: Track[];
   guide: Guide | null;
   monitorMix: MonitorMixLevel[];
+  /**
+   * The Project's tempo and time signature. Optional because snapshots saved
+   * before the Project owned them have neither field; `loadSnapshot` fills in
+   * the defaults for those.
+   */
+  tempoBpm?: number;
+  beatsPerBar?: number;
 }
 
 /** One media file (a Take's or Guide's recorded/imported audio+video) to persist alongside a snapshot. */

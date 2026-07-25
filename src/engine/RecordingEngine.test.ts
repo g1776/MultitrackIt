@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { RecordingEngine } from "./RecordingEngine";
+import { DEFAULT_BEATS_PER_BAR, DEFAULT_TEMPO_BPM, RecordingEngine } from "./RecordingEngine";
 import { FakeCaptureAdapter, FakePlaybackAdapter } from "./fakeAdapters";
 
 describe("RecordingEngine", () => {
@@ -558,7 +558,68 @@ describe("RecordingEngine", () => {
     });
   });
 
+  describe("tempo and time signature", () => {
+    it("gives a new Project the default tempo and time signature", () => {
+      engine.createProject("My Song");
+      const project = engine.getActiveProject()!;
+      expect(project.tempoBpm).toBe(DEFAULT_TEMPO_BPM);
+      expect(project.beatsPerBar).toBe(DEFAULT_BEATS_PER_BAR);
+    });
+
+    it("updates tempo and beats per bar independently", () => {
+      engine.createProject("My Song");
+
+      engine.setTempo({ bpm: 120 });
+      expect(engine.getActiveProject()!.tempoBpm).toBe(120);
+      expect(engine.getActiveProject()!.beatsPerBar).toBe(DEFAULT_BEATS_PER_BAR);
+
+      engine.setTempo({ beatsPerBar: 3 });
+      expect(engine.getActiveProject()!.tempoBpm).toBe(120);
+      expect(engine.getActiveProject()!.beatsPerBar).toBe(3);
+    });
+
+    it("rejects a non-positive tempo or time signature", () => {
+      engine.createProject("My Song");
+      expect(() => engine.setTempo({ bpm: 0 })).toThrow();
+      expect(() => engine.setTempo({ beatsPerBar: 0 })).toThrow();
+      expect(engine.getActiveProject()!.tempoBpm).toBe(DEFAULT_TEMPO_BPM);
+    });
+  });
+
   describe("exportSnapshot / loadSnapshot", () => {
+    it("round-trips the Project's tempo and time signature", () => {
+      engine.createProject("My Song");
+      engine.setTempo({ bpm: 120, beatsPerBar: 3 });
+
+      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter());
+      freshEngine.loadSnapshot(engine.exportSnapshot());
+
+      expect(freshEngine.getActiveProject()!.tempoBpm).toBe(120);
+      expect(freshEngine.getActiveProject()!.beatsPerBar).toBe(3);
+    });
+
+    it("defaults tempo and time signature when loading a snapshot saved before they existed", () => {
+      engine.createProject("My Song");
+      const { tempoBpm, beatsPerBar, ...legacy } = engine.exportSnapshot();
+
+      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter());
+      freshEngine.loadSnapshot(legacy);
+
+      expect(freshEngine.getActiveProject()!.tempoBpm).toBe(DEFAULT_TEMPO_BPM);
+      expect(freshEngine.getActiveProject()!.beatsPerBar).toBe(DEFAULT_BEATS_PER_BAR);
+    });
+
+    it("falls back to the defaults for a snapshot carrying a non-positive tempo", () => {
+      engine.createProject("My Song");
+      const snapshot = { ...engine.exportSnapshot(), tempoBpm: 0, beatsPerBar: -1 };
+
+      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter());
+      freshEngine.loadSnapshot(snapshot);
+
+      expect(freshEngine.getActiveProject()!.tempoBpm).toBe(DEFAULT_TEMPO_BPM);
+      expect(freshEngine.getActiveProject()!.beatsPerBar).toBe(DEFAULT_BEATS_PER_BAR);
+    });
+
     it("round-trips a Project's Tracks, Takes, Guide, and Monitor Mix levels", async () => {
       engine.createProject("My Song");
       engine.importGuide("guide-media-ref");

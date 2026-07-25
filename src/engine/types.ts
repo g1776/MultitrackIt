@@ -34,6 +34,14 @@ export interface Project {
   createdAt: number;
   tracks: Track[];
   guide: Guide | null;
+  /**
+   * The piece's tempo in beats per minute. Belongs to the Project rather
+   * than the Guide: every Track is performed against the same tempo, and an
+   * imported Guide has no knowable tempo while its Project still needs one.
+   */
+  tempoBpm: number;
+  /** The time signature's beats per bar (its numerator, e.g. 4 for 4/4). */
+  beatsPerBar: number;
 }
 
 export interface MonitorMixLevel {

@@ -16,6 +16,16 @@ function nextId(prefix: string): string {
  */
 export const DEFAULT_COUNT_IN_MS = 3000;
 
+/** Tempo a new Project starts at, and the fallback for snapshots saved before Projects owned a tempo. */
+export const DEFAULT_TEMPO_BPM = 100;
+
+/** Time signature a new Project starts at (4/4), and the fallback for pre-tempo snapshots. */
+export const DEFAULT_BEATS_PER_BAR = 4;
+
+function positiveOr(value: number | undefined, fallback: number): number {
+  return value !== undefined && value > 0 ? value : fallback;
+}
+
 /**
  * Owns Project/Track/Take/Guide state, the Monitor Mix, and playback sync.
  * Depends only on the capture/playback adapter interfaces, never on
@@ -44,8 +54,32 @@ export class RecordingEngine {
   ) {}
 
   createProject(name: string): Project {
-    this.project = { id: nextId("project"), name, createdAt: Date.now(), tracks: [], guide: null };
+    this.project = {
+      id: nextId("project"),
+      name,
+      createdAt: Date.now(),
+      tracks: [],
+      guide: null,
+      tempoBpm: DEFAULT_TEMPO_BPM,
+      beatsPerBar: DEFAULT_BEATS_PER_BAR,
+    };
     return this.project;
+  }
+
+  /**
+   * Updates the Project's tempo and/or time signature — the single source of
+   * truth for both, read by anything that needs them (e.g. metronome Guide
+   * generation) rather than each caller carrying its own copy.
+   */
+  setTempo(changes: { bpm?: number; beatsPerBar?: number }): void {
+    const project = this.requireProject();
+    // Validated up front so a partly-invalid change leaves the Project untouched.
+    if (changes.bpm !== undefined && !(changes.bpm > 0)) throw new Error("bpm must be positive");
+    if (changes.beatsPerBar !== undefined && !(changes.beatsPerBar > 0)) {
+      throw new Error("beatsPerBar must be positive");
+    }
+    if (changes.bpm !== undefined) project.tempoBpm = changes.bpm;
+    if (changes.beatsPerBar !== undefined) project.beatsPerBar = changes.beatsPerBar;
   }
 
   /** Imports reference audio as the Project's Guide, replacing any existing one. */
@@ -264,6 +298,8 @@ export class RecordingEngine {
       createdAt: project.createdAt,
       tracks: project.tracks,
       guide: project.guide,
+      tempoBpm: project.tempoBpm,
+      beatsPerBar: project.beatsPerBar,
       monitorMix: Array.from(this.monitorMix.entries()).map(([targetId, level]) => ({
         targetId,
         level,
@@ -285,6 +321,12 @@ export class RecordingEngine {
       createdAt: snapshot.createdAt,
       tracks: snapshot.tracks,
       guide: snapshot.guide,
+      // Snapshots predating Project-owned tempo carry neither field, and a
+      // hand-edited one could carry a nonsensical value; both fall back to
+      // the defaults rather than loading a Project that violates the same
+      // invariant `setTempo` enforces.
+      tempoBpm: positiveOr(snapshot.tempoBpm, DEFAULT_TEMPO_BPM),
+      beatsPerBar: positiveOr(snapshot.beatsPerBar, DEFAULT_BEATS_PER_BAR),
     };
     this.monitorMix = new Map(snapshot.monitorMix.map((m) => [m.targetId, m.level]));
   }
