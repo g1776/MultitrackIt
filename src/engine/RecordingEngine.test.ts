@@ -566,30 +566,30 @@ describe("RecordingEngine", () => {
       expect(project.beatsPerBar).toBe(DEFAULT_BEATS_PER_BAR);
     });
 
-    it("updates tempo and beats per bar independently", () => {
-      engine.createProject("My Song");
-
-      engine.setTempo({ bpm: 120 });
-      expect(engine.getActiveProject()!.tempoBpm).toBe(120);
-      expect(engine.getActiveProject()!.beatsPerBar).toBe(DEFAULT_BEATS_PER_BAR);
-
-      engine.setTempo({ beatsPerBar: 3 });
-      expect(engine.getActiveProject()!.tempoBpm).toBe(120);
-      expect(engine.getActiveProject()!.beatsPerBar).toBe(3);
+    it("creates a Project at the given tempo and time signature", () => {
+      engine.createProject("My Song", { bpm: 120, beatsPerBar: 3 });
+      const project = engine.getActiveProject()!;
+      expect(project.tempoBpm).toBe(120);
+      expect(project.beatsPerBar).toBe(3);
     });
 
-    it("rejects a non-positive tempo or time signature", () => {
-      engine.createProject("My Song");
-      expect(() => engine.setTempo({ bpm: 0 })).toThrow();
-      expect(() => engine.setTempo({ beatsPerBar: 0 })).toThrow();
-      expect(engine.getActiveProject()!.tempoBpm).toBe(DEFAULT_TEMPO_BPM);
+    it("defaults whichever of the two is omitted at creation", () => {
+      engine.createProject("My Song", { bpm: 120 });
+      const project = engine.getActiveProject()!;
+      expect(project.tempoBpm).toBe(120);
+      expect(project.beatsPerBar).toBe(DEFAULT_BEATS_PER_BAR);
+    });
+
+    it("rejects a non-positive tempo or time signature at creation", () => {
+      expect(() => engine.createProject("My Song", { bpm: 0 })).toThrow();
+      expect(() => engine.createProject("My Song", { beatsPerBar: 0 })).toThrow();
+      expect(engine.getActiveProject()).toBeNull();
     });
   });
 
   describe("exportSnapshot / loadSnapshot", () => {
     it("round-trips the Project's tempo and time signature", () => {
-      engine.createProject("My Song");
-      engine.setTempo({ bpm: 120, beatsPerBar: 3 });
+      engine.createProject("My Song", { bpm: 120, beatsPerBar: 3 });
 
       const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter());
       freshEngine.loadSnapshot(engine.exportSnapshot());

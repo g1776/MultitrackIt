@@ -53,33 +53,29 @@ export class RecordingEngine {
     private readonly countInMs: number = DEFAULT_COUNT_IN_MS
   ) {}
 
-  createProject(name: string): Project {
+  /**
+   * Creates a Project at a fixed tempo and time signature (defaulting to
+   * 100bpm, 4/4). Both are settable only here: they are read-only for the
+   * Project's lifetime, so anything already recorded against them — Takes,
+   * and a metronome Guide generated from them — can never be invalidated by
+   * a later change. Re-tempoing an existing Project is a separate problem,
+   * not yet modelled.
+   */
+  createProject(name: string, tempo: { bpm?: number; beatsPerBar?: number } = {}): Project {
+    if (tempo.bpm !== undefined && !(tempo.bpm > 0)) throw new Error("bpm must be positive");
+    if (tempo.beatsPerBar !== undefined && !(tempo.beatsPerBar > 0)) {
+      throw new Error("beatsPerBar must be positive");
+    }
     this.project = {
       id: nextId("project"),
       name,
       createdAt: Date.now(),
       tracks: [],
       guide: null,
-      tempoBpm: DEFAULT_TEMPO_BPM,
-      beatsPerBar: DEFAULT_BEATS_PER_BAR,
+      tempoBpm: tempo.bpm ?? DEFAULT_TEMPO_BPM,
+      beatsPerBar: tempo.beatsPerBar ?? DEFAULT_BEATS_PER_BAR,
     };
     return this.project;
-  }
-
-  /**
-   * Updates the Project's tempo and/or time signature — the single source of
-   * truth for both, read by anything that needs them (e.g. metronome Guide
-   * generation) rather than each caller carrying its own copy.
-   */
-  setTempo(changes: { bpm?: number; beatsPerBar?: number }): void {
-    const project = this.requireProject();
-    // Validated up front so a partly-invalid change leaves the Project untouched.
-    if (changes.bpm !== undefined && !(changes.bpm > 0)) throw new Error("bpm must be positive");
-    if (changes.beatsPerBar !== undefined && !(changes.beatsPerBar > 0)) {
-      throw new Error("beatsPerBar must be positive");
-    }
-    if (changes.bpm !== undefined) project.tempoBpm = changes.bpm;
-    if (changes.beatsPerBar !== undefined) project.beatsPerBar = changes.beatsPerBar;
   }
 
   /** Imports reference audio as the Project's Guide, replacing any existing one. */

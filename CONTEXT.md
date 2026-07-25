@@ -3,7 +3,7 @@
 ## Glossary
 
 **Project**
-The top-level container holding everything for one song/piece — its Tracks and Takes. Single-performer only: one person records all Tracks in a Project; no collaborator/contributor concept exists. A Project owns the **tempo** and **time signature** of the piece: every Track is performed against the same tempo, so it belongs to the song rather than to any one artifact within it (notably, it is not a property of the Guide — an imported Guide has no knowable tempo, but the Project still has one).
+The top-level container holding everything for one song/piece — its Tracks and Takes. Single-performer only: one person records all Tracks in a Project; no collaborator/contributor concept exists. A Project owns the **tempo** and **time signature** of the piece: every Track is performed against the same tempo, so it belongs to the song rather than to any one artifact within it (notably, it is not a property of the Guide — an imported Guide has no knowable tempo, but the Project still has one). Both are chosen when the Project is created and read-only thereafter, so nothing recorded or generated against them can be invalidated by a later change; re-tempoing an existing Project is a separate problem, not yet modelled.
 
 **Project timeline**
 The single time axis all Tracks and the Guide are positioned on. Its zero point is the instant recording capture begins — that is, the moment the Count-in ends. The Guide's first beat sits at t=0, so a Guide of a given length offers that entire length as recordable timeline; none of it is consumed by getting ready to record. Count-in and Count-in Padding occupy negative time: they precede the timeline rather than occupying its beginning.

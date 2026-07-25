@@ -15,12 +15,11 @@ interface ProjectState {
 
   refreshProject: () => void;
   refreshSavedProjects: () => Promise<void>;
-  createProject: (name: string) => void;
+  createProject: (name: string, tempo: { bpm?: number; beatsPerBar?: number }) => void;
   saveProject: () => Promise<void>;
   loadProject: (id: string) => Promise<void>;
   renameTrack: (trackId: string, name: string) => void;
   selectTake: (trackId: string, takeId: string) => void;
-  setTempo: (changes: { bpm?: number; beatsPerBar?: number }) => void;
   importGuide: (mediaRef: string) => void;
   setGuideIncludeInMonitorMix: (include: boolean) => void;
   setGuideIncludeInMixdown: (include: boolean) => void;
@@ -72,9 +71,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  createProject: (name) => {
+  createProject: (name, tempo) => {
     if (!name.trim()) return;
-    engine.createProject(name.trim());
+    set({ error: null });
+    try {
+      engine.createProject(name.trim(), tempo);
+    } catch (e) {
+      set({ error: (e as Error).message });
+      return;
+    }
     set({ monitorMixLevels: {} });
     get().refreshProject();
   },
@@ -117,8 +122,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   selectTake: (trackId, takeId) => guarded(set, () => engine.selectTake(trackId, takeId)),
-
-  setTempo: (changes) => guarded(set, () => engine.setTempo(changes)),
 
   importGuide: (mediaRef) => guarded(set, () => engine.importGuide(mediaRef)),
 

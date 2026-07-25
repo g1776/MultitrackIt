@@ -48,7 +48,7 @@ export function GuideSection() {
         </label>
         <span className="hint">or</span>
         <button onClick={handleGenerateMetronomeGuide}>
-          Generate Metronome Guide at {tempoBpm} BPM, {beatsPerBar} beats/bar
+          Generate Metronome Guide at {tempoBpm} BPM
         </button>
       </div>
       {guide && (
