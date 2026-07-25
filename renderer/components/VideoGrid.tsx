@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type CSSProperties } from "react";
 import { computeGridDimensions, computeGridLayout } from "../../src/engine/scheduling";
 import type { Track } from "../../src/engine/types";
 import { useTransportStore } from "../store/useTransportStore";
@@ -77,21 +77,34 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
     return () => timers.forEach((timer) => timer && clearTimeout(timer));
   }, [isPlaying, isRecording, recordingTrackId, gridLayout]);
 
-  // Whether the Track currently being recorded onto needs its own live
-  // preview cell — false once it has a completed Take of its own (recording
-  // a re-take already appears via its existing gridLayout cell).
-  const showLivePreview =
-    isRecording &&
-    livePreviewTrackId !== undefined &&
-    !gridLayout.some((cell) => cell.trackId === livePreviewTrackId);
-  const renderCellCount = gridLayout.length + (showLivePreview ? 1 : 0);
+  // The cells to render, in grid order: one per Track in the Layout, plus a
+  // trailing cell for a Track being recorded onto for the first time (it has
+  // no selected Take yet, so computeGridLayout gives it no cell). A re-take
+  // does *not* get a trailing cell — it takes over the Track's existing cell,
+  // so the in-progress Take appears in the position that Track already
+  // occupies rather than jumping to the end of the grid and reshaping it.
+  const showLivePreview = isRecording && livePreviewTrackId !== undefined;
+  const livePreviewCellIndex = gridLayout.findIndex((cell) => cell.trackId === livePreviewTrackId);
+  const hasTrailingLiveCell = showLivePreview && livePreviewCellIndex === -1;
+
+  const renderCells: { key: string; trackId: string; isLive: boolean }[] = [
+    ...gridLayout.map((cell) => ({
+      key: cell.trackId,
+      trackId: cell.trackId,
+      isLive: showLivePreview && cell.trackId === livePreviewTrackId,
+    })),
+    ...(hasTrailingLiveCell ? [{ key: "live-preview", trackId: livePreviewTrackId!, isLive: true }] : []),
+  ];
+  const renderCellCount = renderCells.length;
   const { rows: renderRows, cols: renderCols } = computeGridDimensions(renderCellCount);
 
   const livePreviewVideoRef = useRef<HTMLVideoElement | null>(null);
 
   // Real-time self-view: attach the in-progress capture's live MediaStream
-  // (not a finished mediaRef) so a new Track's cell shows video immediately
-  // instead of only after stopping and reloading the Project.
+  // (not a finished mediaRef) so the recording Track's cell shows video
+  // immediately instead of only after stopping and reloading the Project.
+  // Re-runs when the live cell moves between a Track's own grid position and
+  // the trailing new-Track cell, since that is a different DOM element.
   useEffect(() => {
     const video = livePreviewVideoRef.current;
     if (!showLivePreview || !video) return;
@@ -104,65 +117,51 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
     return () => {
       video.srcObject = null;
     };
-  }, [showLivePreview]);
+  }, [showLivePreview, livePreviewTrackId, hasTrailingLiveCell]);
 
   if (renderCellCount === 0) return null;
 
   return (
     <div
       className="video-grid"
-      // Computed layout, not cosmetics: the grid's shape depends on the cell
-      // count, so it (and each cell's position below) stays inline while the
-      // cosmetic rules live in global.css.
-      style={{
-        gridTemplateColumns: `repeat(${renderCols}, 1fr)`,
-        gridTemplateRows: `repeat(${renderRows}, 1fr)`,
-      }}
+      // Computed layout, not cosmetics: the grid's shape and its overall
+      // aspect ratio both depend on the cell count, so they stay inline while
+      // the cosmetic rules live in global.css. --grid-aspect is the whole
+      // grid's ratio (16:9 cells tiled renderCols x renderRows); global.css
+      // uses it to size the grid to fit inside its pane in both dimensions.
+      style={
+        {
+          gridTemplateColumns: `repeat(${renderCols}, 1fr)`,
+          gridTemplateRows: `repeat(${renderRows}, 1fr)`,
+          "--grid-aspect": `${(renderCols * 16) / (renderRows * 9)}`,
+        } as CSSProperties
+      }
     >
-      {gridLayout.map((cell, index) => {
-        const cellTrack = tracks.find((t) => t.id === cell.trackId)!;
-        const mediaRef = selectedTakeMediaRef(cellTrack);
+      {renderCells.map((cell) => {
+        const cellTrack = tracks.find((t) => t.id === cell.trackId);
+        const mediaRef = cellTrack && selectedTakeMediaRef(cellTrack);
         return (
-          <div
-            key={cell.trackId}
-            className="video-grid__cell"
-            style={{
-              gridRow: Math.floor(index / renderCols) + 1,
-              gridColumn: (index % renderCols) + 1,
-            }}
-          >
-            {mediaRef && (
+          <div key={cell.key} className="video-grid__cell">
+            {cell.isLive ? (
               // eslint-disable-next-line jsx-a11y/media-has-caption
-              <video
-                ref={(el) => {
-                  if (el) gridVideoRefs.current.set(cell.trackId, el);
-                  else gridVideoRefs.current.delete(cell.trackId);
-                }}
-                src={mediaRef}
-                muted
-                playsInline
-              />
+              <video ref={livePreviewVideoRef} muted playsInline autoPlay />
+            ) : (
+              mediaRef && (
+                // eslint-disable-next-line jsx-a11y/media-has-caption
+                <video
+                  ref={(el) => {
+                    if (el) gridVideoRefs.current.set(cell.trackId, el);
+                    else gridVideoRefs.current.delete(cell.trackId);
+                  }}
+                  src={mediaRef}
+                  muted
+                  playsInline
+                />
+              )
             )}
           </div>
         );
       })}
-      {showLivePreview &&
-        (() => {
-          const index = gridLayout.length;
-          return (
-            <div
-              key="live-preview"
-              className="video-grid__cell"
-              style={{
-                gridRow: Math.floor(index / renderCols) + 1,
-                gridColumn: (index % renderCols) + 1,
-              }}
-            >
-              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-              <video ref={livePreviewVideoRef} muted playsInline autoPlay />
-            </div>
-          );
-        })()}
     </div>
   );
 }

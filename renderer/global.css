@@ -47,14 +47,58 @@
   box-sizing: border-box;
 }
 
-body {
-  margin: 0;
+html,
+body,
+#root {
+  height: 100%;
 }
 
-main {
+body {
+  margin: 0;
+  /* The page itself never scrolls: both panes are sized to the viewport and
+     the controls pane does its own scrolling if it needs to. */
+  overflow: hidden;
+}
+
+/* Controls left, video grid right, both fitting the viewport. */
+.app {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) 1fr;
+  gap: var(--space-5);
+  height: 100%;
   padding: var(--space-5);
-  max-width: 880px;
-  margin: 0 auto;
+}
+
+/* The one scrollable region — a Project with many Tracks overflows here
+   rather than pushing the grid off screen. min-height:0 is what lets a grid
+   child actually scroll instead of stretching its track. */
+.app__controls {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: var(--space-3);
+}
+
+/* Centres the grid in whatever space is left over once it has been shrunk
+   to fit. min-width/min-height:0 keep this track from being sized by the
+   grid's intrinsic size instead of the pane's, and container-type:size makes
+   the pane's own dimensions queryable so the grid can size itself against
+   them (see .video-grid). */
+.app__stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  container-type: size;
+}
+
+/* Narrow windows: stack the panes, giving the grid a fixed share of the
+   height so it still never runs past the bottom of the screen. */
+@media (max-width: 800px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr minmax(0, 40%);
+  }
 }
 
 /* ---- Headings, labels, values ---------------------------------------- */
@@ -235,18 +279,29 @@ section {
 .video-grid {
   display: grid;
   gap: var(--space-2);
-  margin-top: var(--space-4);
+  /* Fit-inside, stated directly rather than left to max-width/max-height:
+     take the pane's full width, unless the height the aspect ratio then
+     implies would overflow the pane, in which case be as wide as the pane's
+     height allows. Either way the whole grid is on screen — it never runs
+     past the bottom or the right edge. --grid-aspect is set inline by
+     VideoGrid, since it depends on the cell count. */
+  aspect-ratio: var(--grid-aspect);
+  width: min(100%, calc(100cqh * var(--grid-aspect)));
 }
 
 .video-grid__cell {
   background: #000;
-  aspect-ratio: 16 / 9;
+  min-width: 0;
+  min-height: 0;
 }
 
 .video-grid__cell video {
   display: block;
   width: 100%;
   height: 100%;
+  /* Cells are 16:9 but a capture device may not be — cover rather than
+     letterbox, so the grid stays a clean set of equal rectangles. */
+  object-fit: cover;
 }
 
 /* Named by role rather than size, so a later design pass can retune the
