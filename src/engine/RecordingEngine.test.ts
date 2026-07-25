@@ -298,6 +298,44 @@ describe("RecordingEngine", () => {
       expect(playback.playedSchedules).toHaveLength(0);
     });
 
+    it("folds the Count-in duration into the new Take's Offset when recorded against a Monitor Mix, so it doesn't play back early relative to what it was actually recorded against", async () => {
+      const countInEngine = new RecordingEngine(capture, playback, 500);
+      countInEngine.createProject("My Song");
+      await countInEngine.recordTake(undefined);
+      await countInEngine.stopRecording();
+
+      await countInEngine.recordTake(undefined);
+      await countInEngine.stopRecording();
+
+      const secondTake = countInEngine.getActiveProject()!.tracks[1].takes[0];
+      expect(secondTake.offsetMs).toBe(500);
+    });
+
+    it("does not fold the Count-in duration into the very first Take's Offset (nothing to sync against)", async () => {
+      const countInEngine = new RecordingEngine(capture, playback, 500);
+      countInEngine.createProject("My Song");
+
+      await countInEngine.recordTake(undefined);
+      await countInEngine.stopRecording();
+
+      const firstTake = countInEngine.getActiveProject()!.tracks[0].takes[0];
+      expect(firstTake.offsetMs).toBe(0);
+    });
+
+    it("subtracts measured latency from the Count-in-corrected Offset", async () => {
+      const countInEngine = new RecordingEngine(capture, playback, 500);
+      countInEngine.createProject("My Song");
+      await countInEngine.recordTake(undefined);
+      await countInEngine.stopRecording();
+
+      capture.reportedLatencyMs = 80;
+      await countInEngine.recordTake(undefined);
+      await countInEngine.stopRecording();
+
+      const secondTake = countInEngine.getActiveProject()!.tracks[1].takes[0];
+      expect(secondTake.offsetMs).toBe(420);
+    });
+
     it("excludes the Track currently being recorded onto from the Monitor Mix", async () => {
       engine.createProject("My Song");
       await engine.recordTake(undefined);

@@ -29,6 +29,13 @@ export class RecordingEngine {
   private activeCaptureTrackId: TrackId | null = null;
   private activePlaybackHandle: PlaybackHandle | null = null;
   private activeMonitorPlaybackHandle: PlaybackHandle | null = null;
+  /**
+   * Whether the recording in progress actually had a Monitor Mix playing
+   * (false when recording the very first Take, with nothing to sync
+   * against). Read by `stopRecording` to decide whether the Count-in gap
+   * needs to be folded into the new Take's Offset — see `recordTake`.
+   */
+  private activeRecordingHadMonitorMix = false;
 
   constructor(
     private readonly capture: CaptureAdapter,
@@ -117,7 +124,8 @@ export class RecordingEngine {
       this.monitorMix,
       track.id
     );
-    if (monitorSchedule.entries.length > 0) {
+    this.activeRecordingHadMonitorMix = monitorSchedule.entries.length > 0;
+    if (this.activeRecordingHadMonitorMix) {
       this.activeMonitorPlaybackHandle = await this.playback.play(monitorSchedule);
     }
 
@@ -148,13 +156,21 @@ export class RecordingEngine {
 
     const track = this.requireTrack(trackId);
     const latencyMs = this.capture.getLatencyMs?.();
+    // Capture only actually started once the Count-in elapsed (see
+    // recordTake), so this Take's own t=0 is `countInMs` later than the
+    // Monitor Mix's t=0 it was performed against — that gap must be folded
+    // into its Offset, or it plays back countInMs too early relative to
+    // the material it was recorded in sync with. Only applies when there
+    // was a Monitor Mix to sync against; the very first Take has nothing
+    // to be offset from. Latency correction (negated: a Take recorded
+    // against Monitor Mix output that arrived `latencyMs` late needs to
+    // start that much earlier to line back up) layers on top of that.
+    const countInCorrectionMs = this.activeRecordingHadMonitorMix ? this.countInMs : 0;
     const take: Take = {
       id: nextId("take"),
       trackId,
       mediaRef,
-      // Negated: a Take recorded against Monitor Mix output that arrived
-      // `latencyMs` late needs to start that much earlier to line back up.
-      offsetMs: latencyMs ? -latencyMs : 0,
+      offsetMs: countInCorrectionMs - (latencyMs ?? 0),
       createdAt: Date.now(),
     };
     track.takes.push(take);
@@ -162,6 +178,7 @@ export class RecordingEngine {
 
     this.activeCaptureHandle = null;
     this.activeCaptureTrackId = null;
+    this.activeRecordingHadMonitorMix = false;
     this.status = "idle";
   }
 
