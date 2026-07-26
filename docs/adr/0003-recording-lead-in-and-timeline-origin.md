@@ -4,6 +4,13 @@
 
 Accepted
 
+Amended by ADR 0005. Every decision below stands, and the measurements in
+ADR 0005 reaffirm them. What ADR 0005 corrects is an unmeasured premise this
+ADR reasoned from: that capture begins when the engine asks it to. It does
+not — device acquisition costs a beat, variably — so "the timeline's zero
+point is capture start" was true of the model and false of the code until
+ADR 0005 was implemented.
+
 ## Context
 
 Recording began with a fixed 3000ms Count-in (`DEFAULT_COUNT_IN_MS`),

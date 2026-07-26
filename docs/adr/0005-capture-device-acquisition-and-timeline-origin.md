@@ -2,10 +2,14 @@
 
 ## Status
 
-Proposed
+Accepted
 
-Supersedes part of ADR 0003 (recording lead-in and timeline origin) — see
-_Relationship to ADR 0003_ below. Triggers the revisit clause in ADR 0004.
+Corrects a factual premise of ADR 0003 (recording lead-in and timeline
+origin) without reversing any of its decisions — see _Relationship to ADR
+0003_ below. Triggers the revisit clause in ADR 0004.
+
+Implemented by #24. The related capture-processing defect, which shares the
+gain symptom but not the cause, is #25.
 
 ## Context
 
