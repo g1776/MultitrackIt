@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { diagnosticsStorage, engine, engineEventLog } from "../store/engine";
+import { diagnosticsStorage, engine, engineEventLog, playbackAdapter } from "../store/engine";
 import {
   buildReport,
   guideWouldBeSilentWhileRecording,
@@ -33,6 +33,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
       const report = buildReport(engineEventLog.getEvents(), {
         createdAt: new Date().toISOString(),
         project: summariseProject(engine.getActiveProject()),
+        audioClock: playbackAdapter.getAudioClockSession() ?? null,
       });
       setWrittenPath(await diagnosticsStorage.writeReport(report));
     } catch (e) {

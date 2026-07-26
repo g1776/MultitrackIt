@@ -7,6 +7,7 @@ import type {
   PlaybackSchedule,
 } from "../engine/adapters";
 import { computeAudioGraphSchedule } from "../engine/scheduling";
+import type { AudioClockSession } from "../diagnostics/types";
 
 interface ActiveCapture extends CaptureHandle {
   stream: MediaStream;
@@ -128,6 +129,7 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
   private nextId = 1;
   private active = new Map<string, ActivePlayback>();
   private audioContext: AudioContext | undefined;
+  private audioClockSession: AudioClockSession | undefined;
 
   /**
    * The single AudioContext shared across every play() call for this
@@ -136,8 +138,29 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
    * at t=0 must be timed on one clock, not two.
    */
   getAudioContext(): AudioContext {
-    if (!this.audioContext) this.audioContext = new AudioContext();
+    if (!this.audioContext) {
+      this.audioContext = new AudioContext();
+      this.audioClockSession = {
+        sessionId: `audio-clock-${Date.now().toString(36)}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}`,
+        createdAtEpochMs: Date.now(),
+      };
+    }
     return this.audioContext;
+  }
+
+  /**
+   * Identifies the clock `getAudioContext().currentTime` reads from, for
+   * diagnostics reports whose timestamps count from its creation. Undefined
+   * until something has actually needed the context — note that the first
+   * caller may be the diagnostics event sink rather than playback, which is
+   * why the session is minted here and not in play().
+   *
+   * Not part of the PlaybackAdapter seam, mirroring getSyncedStartDelayMs().
+   */
+  getAudioClockSession(): AudioClockSession | undefined {
+    return this.audioClockSession;
   }
 
   async play(schedule: PlaybackSchedule): Promise<PlaybackHandle> {

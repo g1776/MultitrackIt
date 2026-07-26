@@ -1,6 +1,7 @@
 import type { EngineEvent, TimestampedEngineEvent } from "../engine/events";
 import type { Project } from "../engine/types";
 import type {
+  AudioClockSession,
   CountInMeasurement,
   DiagnosticsReport,
   IntervalMeasurement,
@@ -11,6 +12,7 @@ export interface ReportContext {
   /** ISO 8601 wall-clock time the report was written. */
   createdAt: string;
   project: ProjectSummary | null;
+  audioClock: AudioClockSession | null;
 }
 
 /**
@@ -102,7 +104,21 @@ export function buildReport(
     beats: countInStarted?.beats ?? null,
   };
 
-  return { createdAt: context.createdAt, project: context.project, padding, countIn, events };
+  // Reuses the same start/end pairing as the intervals above, so a pass that
+  // never reached capture can't be paired with an earlier pass's capture.
+  const captureStart = {
+    delayAfterCountInMs: elapsedMs(events, "count-in-ended", "capture-started"),
+  };
+
+  return {
+    createdAt: context.createdAt,
+    project: context.project,
+    audioClock: context.audioClock,
+    padding,
+    countIn,
+    captureStart,
+    events,
+  };
 }
 
 /**

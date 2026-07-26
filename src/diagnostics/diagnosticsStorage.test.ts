@@ -19,6 +19,7 @@ describe("FakeDiagnosticsStorageAdapter", () => {
     ],
     {
       createdAt: "2026-07-25T12:00:00.000Z",
+      audioClock: { sessionId: "audio-clock-abc", createdAtEpochMs: 1_700_000_000_000 },
       project: {
         name: "My Song",
         tempoBpm: 100,

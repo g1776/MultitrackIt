@@ -9,6 +9,7 @@ import type { TimestampedEngineEvent } from "../engine/events";
 import type { Project } from "../engine/types";
 
 const PROJECT = { name: "My Song", tempoBpm: 100, beatsPerBar: 4, guide: null };
+const AUDIO_CLOCK = { sessionId: "audio-clock-abc", createdAtEpochMs: 1_700_000_000_000 };
 
 function project(guide: Project["guide"]): Project {
   return {
@@ -24,7 +25,11 @@ function project(guide: Project["guide"]): Project {
 const CREATED_AT = "2026-07-25T12:00:00.000Z";
 
 function report(events: TimestampedEngineEvent[]) {
-  return buildReport(events, { createdAt: CREATED_AT, project: PROJECT });
+  return buildReport(events, {
+    createdAt: CREATED_AT,
+    project: PROJECT,
+    audioClock: AUDIO_CLOCK,
+  });
 }
 
 describe("buildReport", () => {
@@ -87,6 +92,68 @@ describe("buildReport", () => {
     expect(built.events).toEqual(events);
     expect(built.project).toEqual(PROJECT);
     expect(built.createdAt).toBe(CREATED_AT);
+  });
+});
+
+describe("buildReport captureStart", () => {
+  it("states how late capture began relative to the timeline's zero point", () => {
+    const built = report([
+      { type: "count-in-started", requestedDurationMs: 2400, beats: 4, bars: 1, atMs: 810 },
+      { type: "count-in-ended", atMs: 3210 },
+      { type: "capture-started", trackId: "track-2", atMs: 3941 },
+    ]);
+
+    // Capture is meant to begin exactly when the Count-in ends — that instant
+    // is the timeline's zero point, so a non-zero value here displaces every
+    // Take in the pass from the Guide by that much.
+    expect(built.captureStart.delayAfterCountInMs).toBe(731);
+  });
+
+  it("states zero — not null — when capture began exactly on the zero point", () => {
+    const built = report([
+      { type: "count-in-ended", atMs: 3210 },
+      { type: "capture-started", trackId: "track-2", atMs: 3210 },
+    ]);
+
+    expect(built.captureStart.delayAfterCountInMs).toBe(0);
+  });
+
+  it("reports null for a pass abandoned before capture ever started", () => {
+    const built = report([
+      { type: "count-in-started", requestedDurationMs: 2400, beats: 4, bars: 1, atMs: 810 },
+      { type: "count-in-ended", atMs: 3210 },
+    ]);
+
+    expect(built.captureStart.delayAfterCountInMs).toBeNull();
+  });
+
+  it("never pairs the latest Count-in with an earlier pass's capture", () => {
+    const built = report([
+      { type: "count-in-ended", atMs: 1000 },
+      { type: "capture-started", trackId: "track-1", atMs: 1700 },
+      { type: "capture-stopped", trackId: "track-1", takeId: "take-1", offsetMs: 0, atMs: 9000 },
+      { type: "count-in-ended", atMs: 12000 },
+    ]);
+
+    expect(built.captureStart.delayAfterCountInMs).toBeNull();
+  });
+
+  it("has nothing to say about a playback-only pass", () => {
+    const built = report([{ type: "playback-started", purpose: "composite", atMs: 5 }]);
+
+    expect(built.captureStart.delayAfterCountInMs).toBeNull();
+  });
+});
+
+describe("buildReport audioClock", () => {
+  it("names the clock its timestamps were stamped against", () => {
+    expect(report([]).audioClock).toEqual(AUDIO_CLOCK);
+  });
+
+  it("says so plainly when no AudioContext existed yet", () => {
+    const built = buildReport([], { createdAt: CREATED_AT, project: PROJECT, audioClock: null });
+
+    expect(built.audioClock).toBeNull();
   });
 });
 
