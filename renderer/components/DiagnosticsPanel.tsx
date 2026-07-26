@@ -20,6 +20,8 @@ import {
   type ScenarioParams,
   type ScenarioProgress,
 } from "../../src/diagnostics/scenario";
+import type { AnalysisResult } from "../../src/diagnostics/types";
+import { WaveformCanvas } from "./WaveformCanvas";
 
 type ConfigurableScenarioParams = Pick<
   ScenarioParams,
@@ -54,6 +56,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
   const [scenarioProgress, setScenarioProgress] = useState<ScenarioProgress | null>(null);
   const [scenarioWrittenPath, setScenarioWrittenPath] = useState<string | null>(null);
   const [scenarioError, setScenarioError] = useState<string | null>(null);
+  const [scenarioAnalysis, setScenarioAnalysis] = useState<AnalysisResult | null>(null);
 
   const project = summariseProject(engine.getActiveProject());
   const guideSilent = guideWouldBeSilentWhileRecording(project);
@@ -90,6 +93,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
     setScenarioError(null);
     setScenarioWrittenPath(null);
     setScenarioProgress(null);
+    setScenarioAnalysis(null);
     setScenarioRunning(true);
     const scenarioEvents = new EngineEventLog(
       () => playbackAdapter.getAudioContext().currentTime * 1000
@@ -103,6 +107,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
         onProgress: setScenarioProgress,
       });
       const analysis = await analyseScenarioResult(result, playbackAdapter.getAudioContext());
+      setScenarioAnalysis(analysis);
       const report = buildReport(scenarioEvents.getEvents(), {
         createdAt: new Date().toISOString(),
         project: summariseProject(result.project),
@@ -252,6 +257,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
       )}
       {scenarioWrittenPath && <p className="hint">Wrote {scenarioWrittenPath}</p>}
       {scenarioError && <p className="error">{scenarioError}</p>}
+      {scenarioAnalysis && <WaveformCanvas analysis={scenarioAnalysis} />}
     </section>
   );
 }

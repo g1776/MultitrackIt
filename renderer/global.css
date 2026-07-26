@@ -230,6 +230,28 @@ section {
   border-top: var(--border);
 }
 
+.waveform-canvas {
+  margin-top: var(--space-4);
+}
+
+.waveform-canvas canvas {
+  display: block;
+  max-width: 100%;
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+.waveform-canvas__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
 .track-list {
   list-style: none;
   margin: 0;
