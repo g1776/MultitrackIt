@@ -7,7 +7,12 @@ import type {
   PlaybackSchedule,
 } from "../engine/adapters";
 import { computeAudioGraphSchedule } from "../engine/scheduling";
-import type { AudioClockSession } from "../diagnostics/types";
+import type { AudioClockSession, AudioProcessingState } from "../diagnostics/types";
+import {
+  UNPROCESSED_AUDIO_CONSTRAINTS,
+  describeAudioProcessing,
+  type GrantedAudioSettings,
+} from "../diagnostics/audioProcessing";
 
 interface ActiveCapture extends CaptureHandle {
   stream: MediaStream;
@@ -28,9 +33,11 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
   private active = new Map<string, ActiveCapture>();
   private latencyByHandleId = new Map<string, number | undefined>();
   private activeCaptureId: string | undefined;
+  private audioProcessing: AudioProcessingState | undefined;
 
   async startCapture(): Promise<CaptureHandle> {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    const { stream, constraintsRequested } = await openUnprocessedStream();
+    this.audioProcessing = readAudioProcessing(stream, constraintsRequested);
     const recorder = new MediaRecorder(stream);
     const chunks: Blob[] = [];
     recorder.ondataavailable = (event) => {
@@ -94,6 +101,62 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
     const lastHandleId = `capture-${this.nextId - 1}`;
     return this.latencyByHandleId.get(lastHandleId);
   }
+
+  /**
+   * The processing the most recently opened capture stream actually passed
+   * through, read back off the granted track — a Take's provenance, for the
+   * diagnostics report (ADR 0004). Undefined until something has been
+   * captured. Not part of the CaptureAdapter seam, mirroring
+   * getActiveStream(): the engine has no use for it, only the instrument does.
+   */
+  getAudioProcessing(): AudioProcessingState | undefined {
+    return this.audioProcessing;
+  }
+}
+
+/**
+ * Opens a capture stream asking for unprocessed audio, falling back to the
+ * browser's defaults if the device refuses the constrained request outright.
+ *
+ * The constraints are plain rather than `exact`, so this fallback should be
+ * unreachable on a conforming browser — but failing to acquire a device at all
+ * is a far worse outcome than recording it processed, so a refusal costs a
+ * second attempt rather than the Take. Which path ran is returned, so the
+ * report can say we never asked rather than that the ask was ignored.
+ */
+export async function openUnprocessedStream(): Promise<{
+  stream: MediaStream;
+  constraintsRequested: boolean;
+}> {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { ...UNPROCESSED_AUDIO_CONSTRAINTS },
+      video: true,
+    });
+    return { stream, constraintsRequested: true };
+  } catch (error) {
+    // A permission denial must still reject: only an unsatisfiable constraint
+    // is worth retrying, and retrying a refusal would just prompt twice.
+    if ((error as Error)?.name !== "OverconstrainedError") throw error;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    return { stream, constraintsRequested: false };
+  }
+}
+
+/**
+ * Reads what the granted audio track says it is actually doing. Nothing is
+ * assumed from what was asked for: constraint support varies by platform and
+ * browser build, and `getSettings` is what the device answered.
+ */
+export function readAudioProcessing(
+  stream: MediaStream,
+  constraintsRequested: boolean
+): AudioProcessingState {
+  const track = stream.getAudioTracks()[0];
+  const settings: GrantedAudioSettings | null = track?.getSettings
+    ? (track.getSettings() as GrantedAudioSettings)
+    : null;
+  return describeAudioProcessing(settings, { constraintsRequested });
 }
 
 function estimateMonitorOutputLatencyMs(): number | undefined {

@@ -2,6 +2,7 @@ import type { EngineEvent, TimestampedEngineEvent } from "../engine/events";
 import type { Project } from "../engine/types";
 import type {
   AudioClockSession,
+  AudioProcessingState,
   CountInMeasurement,
   DiagnosticsReport,
   IntervalMeasurement,
@@ -13,6 +14,8 @@ export interface ReportContext {
   createdAt: string;
   project: ProjectSummary | null;
   audioClock: AudioClockSession | null;
+  /** What the capture adapter read back off the granted track; null if nothing has been captured. */
+  audioProcessing: AudioProcessingState | null;
 }
 
 /**
@@ -114,6 +117,7 @@ export function buildReport(
     createdAt: context.createdAt,
     project: context.project,
     audioClock: context.audioClock,
+    audioProcessing: context.audioProcessing,
     padding,
     countIn,
     captureStart,

@@ -52,6 +52,44 @@ export interface AudioClockSession {
   createdAtEpochMs: number;
 }
 
+/** The browser audio processors a capture can be subjected to. */
+export type AudioProcessingName = "echoCancellation" | "autoGainControl" | "noiseSuppression";
+
+/**
+ * One processor, as asked for and as the granted track actually reported it.
+ * Both are stated for the same reason the intervals above state requested and
+ * measured separately: a request is an intention, and constraint support
+ * varies by platform and browser build, so what was asked for is no evidence
+ * of what happened to the audio.
+ */
+export interface AudioProcessingControl {
+  /** What capture asked for. Null when the constrained request was refused outright. */
+  requestedEnabled: boolean | null;
+  /** What the granted track reports. Null when this browser doesn't report the setting. */
+  actualEnabled: boolean | null;
+  /** Whether the device did what was asked. Null when either side is unknown. */
+  honoured: boolean | null;
+}
+
+/**
+ * A Take's provenance: whether it was captured raw or through voice-call
+ * processing. Stated in the report rather than left to be inferred later from
+ * how the audio looks (ADR 0004) — a conclusion about onset timing or dynamics
+ * is worthless if it can't be told apart from automatic gain control riding
+ * the level.
+ */
+export interface AudioProcessingState {
+  /** Whether capture asked for unprocessed audio at all, or fell back to browser defaults. */
+  constraintsRequested: boolean;
+  controls: Record<AudioProcessingName, AudioProcessingControl>;
+  /** Processors the device reports as on, whatever was asked for. */
+  stillActive: AudioProcessingName[];
+  /** Processors this browser said nothing about — neither confirmed off nor known on. */
+  unreported: AudioProcessingName[];
+  /** "unknown" when anything went unreported; "processed" wins over it if any processor is known on. */
+  summary: "unprocessed" | "processed" | "unknown";
+}
+
 /**
  * What the pass ran against. The Guide is stated explicitly, including when
  * there isn't one, because its absence is otherwise invisible: a Project with
@@ -85,6 +123,8 @@ export interface DiagnosticsReport {
   project: ProjectSummary | null;
   /** The clock every `atMs` below was stamped against. Null before any AudioContext exists. */
   audioClock: AudioClockSession | null;
+  /** The processing the captured audio actually passed through. Null before any capture. */
+  audioProcessing: AudioProcessingState | null;
   padding: IntervalMeasurement;
   countIn: CountInMeasurement;
   captureStart: CaptureStartMeasurement;

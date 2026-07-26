@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { FakeDiagnosticsStorageAdapter } from "./fakeDiagnosticsStorageAdapter";
 import { buildReport } from "./report";
+import { UNPROCESSED_AUDIO_CONSTRAINTS, describeAudioProcessing } from "./audioProcessing";
 
 describe("FakeDiagnosticsStorageAdapter", () => {
   const report = buildReport(
@@ -20,6 +21,7 @@ describe("FakeDiagnosticsStorageAdapter", () => {
     {
       createdAt: "2026-07-25T12:00:00.000Z",
       audioClock: { sessionId: "audio-clock-abc", createdAtEpochMs: 1_700_000_000_000 },
+      audioProcessing: describeAudioProcessing(UNPROCESSED_AUDIO_CONSTRAINTS),
       project: {
         name: "My Song",
         tempoBpm: 100,

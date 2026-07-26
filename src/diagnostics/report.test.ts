@@ -7,6 +7,7 @@ import {
 } from "./report";
 import type { TimestampedEngineEvent } from "../engine/events";
 import type { Project } from "../engine/types";
+import { describeAudioProcessing } from "./audioProcessing";
 
 const PROJECT = { name: "My Song", tempoBpm: 100, beatsPerBar: 4, guide: null };
 const AUDIO_CLOCK = { sessionId: "audio-clock-abc", createdAtEpochMs: 1_700_000_000_000 };
@@ -29,6 +30,7 @@ function report(events: TimestampedEngineEvent[]) {
     createdAt: CREATED_AT,
     project: PROJECT,
     audioClock: AUDIO_CLOCK,
+    audioProcessing: null,
   });
 }
 
@@ -151,9 +153,37 @@ describe("buildReport audioClock", () => {
   });
 
   it("says so plainly when no AudioContext existed yet", () => {
-    const built = buildReport([], { createdAt: CREATED_AT, project: PROJECT, audioClock: null });
+    const built = buildReport([], {
+      createdAt: CREATED_AT,
+      project: PROJECT,
+      audioClock: null,
+      audioProcessing: null,
+    });
 
     expect(built.audioClock).toBeNull();
+  });
+});
+
+describe("buildReport audioProcessing", () => {
+  it("states the processing the captured audio actually passed through", () => {
+    const audioProcessing = describeAudioProcessing({
+      echoCancellation: true,
+      autoGainControl: false,
+      noiseSuppression: false,
+    });
+    const built = buildReport([], {
+      createdAt: CREATED_AT,
+      project: PROJECT,
+      audioClock: AUDIO_CLOCK,
+      audioProcessing,
+    });
+
+    expect(built.audioProcessing).toEqual(audioProcessing);
+    expect(built.audioProcessing?.stillActive).toEqual(["echoCancellation"]);
+  });
+
+  it("says nothing about processing for a pass that never captured", () => {
+    expect(report([]).audioProcessing).toBeNull();
   });
 });
 

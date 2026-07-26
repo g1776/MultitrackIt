@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { diagnosticsStorage, engine, engineEventLog, playbackAdapter } from "../store/engine";
+import {
+  captureAdapter,
+  diagnosticsStorage,
+  engine,
+  engineEventLog,
+  playbackAdapter,
+} from "../store/engine";
 import {
   buildReport,
   guideWouldBeSilentWhileRecording,
@@ -26,6 +32,9 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
 
   const project = summariseProject(engine.getActiveProject());
   const guideSilent = guideWouldBeSilentWhileRecording(project);
+  // Read at render (like the log itself) rather than held in state: it changes
+  // only when a capture opens, and Refresh re-renders this panel.
+  const audioProcessing = captureAdapter.getAudioProcessing();
 
   async function writeReport(): Promise<void> {
     setError(null);
@@ -34,6 +43,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
         createdAt: new Date().toISOString(),
         project: summariseProject(engine.getActiveProject()),
         audioClock: playbackAdapter.getAudioClockSession() ?? null,
+        audioProcessing: captureAdapter.getAudioProcessing() ?? null,
       });
       setWrittenPath(await diagnosticsStorage.writeReport(report));
     } catch (e) {
@@ -78,6 +88,21 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
             : "No Guide imported."}{" "}
           A pass recorded this way exercises a different Offset path than normal use, so its
           numbers won't describe the case you're chasing.
+        </p>
+      )}
+      {audioProcessing && audioProcessing.summary === "processed" && (
+        <p className="hint">
+          {audioProcessing.constraintsRequested
+            ? `This device kept ${audioProcessing.stillActive.join(", ")} on despite being asked for unprocessed audio.`
+            : `This device refused the unprocessed-audio request outright, so ${audioProcessing.stillActive.join(", ")} stayed on.`}{" "}
+          Timing and level measured from these Takes describe the processing as much as the app.
+        </p>
+      )}
+      {audioProcessing && audioProcessing.summary === "unknown" && (
+        <p className="hint">
+          This device didn't report {audioProcessing.unreported.join(", ")}, so whether it
+          processed the audio is unknown. Timing and level measured from these Takes may describe
+          the processing as much as the app.
         </p>
       )}
       {writtenPath && <p className="hint">Wrote {writtenPath}</p>}

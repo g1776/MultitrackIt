@@ -17,6 +17,9 @@ A single recording attempt for a Track — one continuous record pass. A Track m
 **Monitor Mix**
 The set of playback settings (per-Track/Guide volume, mute) controlling what the performer hears in their headphones while recording a new Take. Distinct from each Track's own mix settings used in the final Project mix/export — e.g., a Guide might be audible in the Monitor Mix but muted in the final export.
 
+**Unprocessed capture**
+Recording a Take with the platform's voice-call audio processing — echo cancellation, automatic gain control, noise suppression — turned off. All three are wrong for music, and echo cancellation is actively harmful here: a Monitor Mix sounds during every recording pass by design, so AEC would spend each Take treating the performer's own signal as echo of the Guide. Whether a device honoured the request varies by platform, so what actually applied is read back from the granted capture device and stated in a diagnostics report rather than assumed — a Take's provenance is part of what a measurement of it means. Re-enabling any of them for a performer monitoring on speakers rather than headphones would be a deliberate trade-off, not the default.
+
 **Guide**
 Imported reference audio (e.g., a backing track or click/metronome) used for timing/pitch reference while recording. Has no Takes and carries no performance — it is not a Track. Excluded from a Mixdown by default.
 
