@@ -17,6 +17,16 @@ export interface StoredMediaFile {
   mimeType: string;
 }
 
+/**
+ * The wire shape for a diagnostics report. Like `StoredProjectSnapshot`, the
+ * main process only writes opaque JSON — the event timeline's structure is
+ * the renderer's business.
+ */
+export interface StoredDiagnosticsReport {
+  createdAt: string;
+  [key: string]: unknown;
+}
+
 export interface StoredProjectSummary {
   id: string;
   name: string;

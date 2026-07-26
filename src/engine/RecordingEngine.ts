@@ -4,7 +4,13 @@ import type {
   CountInAdapter,
   PlaybackAdapter,
   PlaybackHandle,
+  PlaybackSchedule,
 } from "./adapters";
+import type {
+  EngineEventSink,
+  PlaybackPurpose,
+  ScheduledEntryRecord,
+} from "./events";
 import type { EngineStatus, Guide, Project, Take, TakeId, Track, TrackId } from "./types";
 import { buildCompositeSchedule, buildMixUpdates, buildMonitorMixSchedule } from "./scheduling";
 import { computeCountIn, type CountInPlan } from "./countIn";
@@ -47,6 +53,12 @@ export interface RecordingEngineOptions {
   countInBars?: number;
   /** Count-in Padding in ms. Defaults to `DEFAULT_COUNT_IN_PADDING_MS`. */
   countInPaddingMs?: number;
+  /**
+   * Optional observer of lifecycle events, for diagnostics. Absent during
+   * normal operation, and nothing about the engine's behaviour depends on
+   * whether one is present.
+   */
+  events?: EngineEventSink;
 }
 
 /** Tempo a new Project starts at, and the fallback for snapshots saved before Projects owned a tempo. */
@@ -76,6 +88,7 @@ export class RecordingEngine {
   private readonly countIn: CountInAdapter;
   private readonly countInBars: number;
   private readonly countInPaddingMs: number;
+  private readonly events: EngineEventSink | undefined;
 
   constructor(
     private readonly capture: CaptureAdapter,
@@ -85,6 +98,43 @@ export class RecordingEngine {
     this.countIn = options.countIn ?? SILENT_COUNT_IN;
     this.countInBars = options.countInBars ?? DEFAULT_COUNT_IN_BARS;
     this.countInPaddingMs = options.countInPaddingMs ?? DEFAULT_COUNT_IN_PADDING_MS;
+    this.events = options.events;
+  }
+
+  /**
+   * Starts playback of `schedule`, reporting to the event sink both the
+   * schedule that was built and the playback that followed. The one place
+   * playback begins, so a diagnostics timeline can't come to be missing a
+   * pass simply because a new call site forgot to report itself.
+   *
+   * Each entry's computed `startAtMs` is paired with the Take Offset it came
+   * from here rather than carried on `PlaybackScheduleEntry`, so the playback
+   * seam stays about what to play and when, not about where the when came from.
+   */
+  private async startPlayback(
+    purpose: PlaybackPurpose,
+    schedule: PlaybackSchedule
+  ): Promise<PlaybackHandle> {
+    this.recordSchedule(purpose, schedule);
+    const handle = await this.playback.play(schedule);
+    this.events?.record({ type: "playback-started", purpose });
+    return handle;
+  }
+
+  /**
+   * Reports a built schedule to the event sink without playing it — for the
+   * one case where a schedule exists but nothing sounds (an empty Monitor
+   * Mix). The empty schedule is still stated: "nothing was monitored" is a
+   * fact about the pass, and an absent event would read as a gap.
+   */
+  private recordSchedule(purpose: PlaybackPurpose, schedule: PlaybackSchedule): void {
+    if (!this.events) return;
+    const entries: ScheduledEntryRecord[] = schedule.entries.map((entry) => ({
+      takeId: entry.takeId,
+      startAtMs: entry.startAtMs,
+      offsetMs: entry.takeId === "guide" ? 0 : this.findTakeOrNull(entry.takeId)?.offsetMs ?? null,
+    }));
+    this.events.record({ type: "schedule-built", purpose, entries });
   }
 
   /**
@@ -225,18 +275,29 @@ export class RecordingEngine {
       plan.leadInMs
     );
     if (monitorSchedule.entries.length > 0) {
-      this.activeMonitorPlaybackHandle = await this.playback.play(monitorSchedule);
+      this.activeMonitorPlaybackHandle = await this.startPlayback("monitor-mix", monitorSchedule);
+    } else {
+      this.recordSchedule("monitor-mix", monitorSchedule);
     }
 
     // Get ready (silent), then count in (audible), then capture. The clicks
     // come from their own source, never from the Guide, which has not begun
     // sounding yet at this point.
     this.setStatus("getting-ready");
+    this.events?.record({ type: "padding-started", requestedDurationMs: plan.paddingMs });
     await this.wait(plan.paddingMs);
+    this.events?.record({ type: "padding-ended" });
 
     this.setStatus("counting-in");
+    this.events?.record({
+      type: "count-in-started",
+      requestedDurationMs: plan.countInMs,
+      beats: plan.clicks.length,
+      bars: this.countInBars,
+    });
     if (plan.clicks.length > 0) await this.countIn.playCountIn(plan.clicks);
     await this.wait(plan.countInMs);
+    this.events?.record({ type: "count-in-ended" });
 
     try {
       this.activeCaptureHandle = await this.capture.startCapture();
@@ -244,18 +305,24 @@ export class RecordingEngine {
       await this.abandonRecording();
       throw e;
     }
+    this.events?.record({ type: "capture-started", trackId: track.id });
     this.setStatus("recording");
   }
 
   /** Tears down a recording that never reached `recording`, leaving the engine idle. */
   private async abandonRecording(): Promise<void> {
     this.countIn.cancel();
-    if (this.activeMonitorPlaybackHandle) {
-      await this.playback.stop(this.activeMonitorPlaybackHandle);
-      this.activeMonitorPlaybackHandle = null;
-    }
+    await this.stopMonitorPlayback();
     this.activeCaptureTrackId = null;
     this.setStatus("idle");
+  }
+
+  /** Stops Monitor Mix playback if any is in progress, leaving no active handle behind. */
+  private async stopMonitorPlayback(): Promise<void> {
+    if (!this.activeMonitorPlaybackHandle) return;
+    await this.playback.stop(this.activeMonitorPlaybackHandle);
+    this.activeMonitorPlaybackHandle = null;
+    this.events?.record({ type: "playback-stopped", purpose: "monitor-mix" });
   }
 
   /** Resolves after `ms`, or immediately for `ms <= 0` — lets tests skip the real lead-in delay. */
@@ -270,11 +337,7 @@ export class RecordingEngine {
     }
     const trackId = this.activeCaptureTrackId;
     const mediaRef = await this.capture.stopCapture(this.activeCaptureHandle);
-
-    if (this.activeMonitorPlaybackHandle) {
-      await this.playback.stop(this.activeMonitorPlaybackHandle);
-      this.activeMonitorPlaybackHandle = null;
-    }
+    await this.stopMonitorPlayback();
 
     const track = this.requireTrack(trackId);
     const latencyMs = this.capture.getLatencyMs?.();
@@ -294,6 +357,12 @@ export class RecordingEngine {
     };
     track.takes.push(take);
     track.selectedTakeId = take.id;
+    this.events?.record({
+      type: "capture-stopped",
+      trackId,
+      takeId: take.id,
+      offsetMs: take.offsetMs,
+    });
 
     this.activeCaptureHandle = null;
     this.activeCaptureTrackId = null;
@@ -327,8 +396,9 @@ export class RecordingEngine {
     if (this.status === "playing" && this.activePlaybackHandle) {
       const project = this.requireProject();
       await this.playback.stop(this.activePlaybackHandle);
+      this.events?.record({ type: "playback-stopped", purpose: "composite" });
       const schedule = buildCompositeSchedule(project.tracks, project.guide, this.monitorMix);
-      this.activePlaybackHandle = await this.playback.play(schedule);
+      this.activePlaybackHandle = await this.startPlayback("composite", schedule);
     }
   }
 
@@ -361,7 +431,7 @@ export class RecordingEngine {
     const project = this.requireProject();
     const schedule = buildCompositeSchedule(project.tracks, project.guide, this.monitorMix);
 
-    this.activePlaybackHandle = await this.playback.play(schedule);
+    this.activePlaybackHandle = await this.startPlayback("composite", schedule);
     this.setStatus("playing");
   }
 
@@ -369,6 +439,7 @@ export class RecordingEngine {
     if (this.activePlaybackHandle) {
       await this.playback.stop(this.activePlaybackHandle);
       this.activePlaybackHandle = null;
+      this.events?.record({ type: "playback-stopped", purpose: "composite" });
     }
     this.setStatus("idle");
   }
@@ -446,10 +517,16 @@ export class RecordingEngine {
   }
 
   private findTake(takeId: TakeId): Take {
-    for (const track of this.requireProject().tracks) {
+    const take = this.findTakeOrNull(takeId);
+    if (!take) throw new Error(`Take ${takeId} not found`);
+    return take;
+  }
+
+  private findTakeOrNull(takeId: TakeId): Take | null {
+    for (const track of this.project?.tracks ?? []) {
       const take = track.takes.find((t) => t.id === takeId);
       if (take) return take;
     }
-    throw new Error(`Take ${takeId} not found`);
+    return null;
   }
 }
