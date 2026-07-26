@@ -16,6 +16,15 @@ export interface SyntheticCaptureAdapterOptions extends SyntheticSignalParams {
    * acquisition away, which would report green over a defect in this seam.
    */
   armDelayMs?: number;
+  /**
+   * Simulated round-trip capture latency (ms). Defaults to 0. Shifts every
+   * fabricated onset later by this amount, and is reported back through
+   * `getLatencyMs()` — the same method a real capture estimate would use —
+   * so injecting a known value both proves the analysis can report a known
+   * non-zero error and exercises the engine's Offset-correction path end to
+   * end (ADR 0004).
+   */
+  simulatedLatencyMs?: number;
 }
 
 /**
@@ -37,11 +46,13 @@ export class SyntheticCaptureAdapter implements CaptureAdapter {
   private armedState = false;
   private readonly signal: SyntheticSignalParams;
   private readonly armDelayMs: number;
+  private readonly simulatedLatencyMs: number;
 
   constructor(options: SyntheticCaptureAdapterOptions) {
-    const { armDelayMs, ...signal } = options;
+    const { armDelayMs, simulatedLatencyMs, ...signal } = options;
     this.signal = signal;
     this.armDelayMs = armDelayMs ?? 0;
+    this.simulatedLatencyMs = simulatedLatencyMs ?? 0;
   }
 
   isArmed(): boolean {
@@ -77,13 +88,18 @@ export class SyntheticCaptureAdapter implements CaptureAdapter {
     const pitchHz = pitchHzForIndex(this.takeIndex);
     this.takeIndex += 1;
 
-    const samples = renderSyntheticTake(this.signal, pitchHz);
+    const samples = renderSyntheticTake(this.signal, pitchHz, this.simulatedLatencyMs);
     const blob = encodeWav(samples, SYNTHETIC_SAMPLE_RATE);
     return URL.createObjectURL(blob);
   }
 
-  /** No simulated round-trip latency — synthetic Takes carry no Offset correction. */
+  /**
+   * Reports the configured `simulatedLatencyMs` — 0 by default — through the
+   * same method a real latency estimate would use, so injecting a known
+   * value exercises the engine's Offset-correction path end to end (ADR
+   * 0004), not just the analysis that reads the raw captured signal.
+   */
   getLatencyMs(): number | undefined {
-    return undefined;
+    return this.simulatedLatencyMs;
   }
 }

@@ -123,6 +123,48 @@ export interface ScenarioSummary {
   beatCount: number;
   /** Simulated capture-device acquisition delay (ms) the run was made with; 0 for a healthy-device run. */
   armDelayMs: number;
+  /** Simulated capture-device latency (ms) the run was made with; 0 for a healthy-device run. */
+  simulatedLatencyMs: number;
+}
+
+/**
+ * One Track's independent analysis: its own audio, decoded and onset-detected
+ * on its own, so one Track's problem can't contaminate another's measurement
+ * (ADR 0004). `expectedBeatTimesMs` comes from the same function that
+ * generates the Guide, so the expectation and the audio can never disagree.
+ */
+export interface TrackAnalysis {
+  trackId: string;
+  /** Human-readable label (e.g. the Track's name), for a reader who hasn't memorised ids. */
+  label: string;
+  sampleRate: number;
+  durationMs: number;
+  expectedBeatTimesMs: number[];
+  detectedOnsetsMs: number[];
+  /** One entry per expected beat, in order. `null` where that beat was never detected. */
+  perBeatErrorMs: (number | null)[];
+  /** Indices into `expectedBeatTimesMs` that were never detected. */
+  missingBeatIndices: number[];
+  /** Detected onsets that matched no expected beat — a double-trigger or spurious noise, not a shifted error. */
+  spuriousOnsetsMs: number[];
+  /** Downsampled peak (max absolute) array, so audio the onset detector may have mishandled is still visible. */
+  peaks: number[];
+}
+
+/**
+ * The shared result of analysing every Track in a synthetic sync scenario.
+ * Rendered by both the report and, in a later ticket, the on-screen canvas —
+ * one object, so the screen and the file can never disagree (ADR 0004).
+ */
+export interface AnalysisResult {
+  /**
+   * The simulated capture-device latency the run was made with. Recorded
+   * alongside the per-beat errors so a calibration run — one deliberately
+   * made to report a known non-zero error — can never be mistaken for a
+   * real measurement.
+   */
+  simulatedLatencyMs: number;
+  tracks: TrackAnalysis[];
 }
 
 /**
@@ -141,6 +183,8 @@ export interface DiagnosticsReport {
   audioProcessing: AudioProcessingState | null;
   /** Present only for a synthetic sync scenario run; null for an ordinary manual pass. */
   scenario: ScenarioSummary | null;
+  /** Present only once a synthetic scenario's Takes have been analysed; null otherwise. */
+  analysis: AnalysisResult | null;
   padding: IntervalMeasurement;
   countIn: CountInMeasurement;
   captureStart: CaptureStartMeasurement;

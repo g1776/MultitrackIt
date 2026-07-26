@@ -1,6 +1,7 @@
 import type { EngineEvent, TimestampedEngineEvent } from "../engine/events";
 import type { Project } from "../engine/types";
 import type {
+  AnalysisResult,
   AudioClockSession,
   AudioProcessingState,
   CountInMeasurement,
@@ -19,6 +20,8 @@ export interface ReportContext {
   audioProcessing: AudioProcessingState | null;
   /** The scenario parameters this pass was run with, for a synthetic scenario report; null for an ordinary manual pass. */
   scenario: ScenarioSummary | null;
+  /** The per-Track onset/error analysis, once a synthetic scenario's Takes have been analysed; null otherwise. */
+  analysis: AnalysisResult | null;
 }
 
 /**
@@ -122,6 +125,7 @@ export function buildReport(
     audioClock: context.audioClock,
     audioProcessing: context.audioProcessing,
     scenario: context.scenario,
+    analysis: context.analysis,
     padding,
     countIn,
     captureStart,

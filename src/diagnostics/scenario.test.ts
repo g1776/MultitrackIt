@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { FakeCountInAdapter, FakePlaybackAdapter } from "../engine/fakeAdapters";
 import { createFakeEventSink } from "./fakeEventSink";
 import {
+  analyseScenarioResult,
   DEFAULT_SCENARIO_PARAMS,
   runSyntheticScenario,
   type RunSyntheticScenarioOptions,
@@ -52,6 +53,7 @@ describe("runSyntheticScenario", () => {
       beatsPerBar: 4,
       beatCount: 8,
       armDelayMs: 0,
+      simulatedLatencyMs: 0,
     });
   });
 
@@ -98,6 +100,7 @@ describe("runSyntheticScenario", () => {
     { beatsPerBar: 0 },
     { beatCount: 0 },
     { armDelayMs: -1 },
+    { simulatedLatencyMs: -1 },
   ])("rejects an invalid scenario configuration %o", async (overrides) => {
     await expect(run({ params: overrides })).rejects.toThrow();
   });
@@ -105,5 +108,35 @@ describe("runSyntheticScenario", () => {
   it("still completes, and reports the value used, when a non-zero arm delay is simulated", async () => {
     const { params } = await run({ params: { trackCount: 1, armDelayMs: 15 } });
     expect(params.armDelayMs).toBe(15);
+  });
+
+  it("still completes, and reports the value used, when a non-zero simulated latency is configured", async () => {
+    const { params } = await run({ params: { trackCount: 1, simulatedLatencyMs: 30 } });
+    expect(params.simulatedLatencyMs).toBe(30);
+  });
+});
+
+describe("analyseScenarioResult", () => {
+  it("decodes each Track's own selected Take and analyses each independently", async () => {
+    const result = await run({ params: { trackCount: 2, simulatedLatencyMs: 30 } });
+    const audioContext = { sampleRate: 1000 } as AudioContext;
+    const decode = vi.fn(async (_mediaRef: string, _audioContext: AudioContext) => ({
+      samples: new Float32Array(100),
+      sampleRate: 1000,
+    }));
+
+    const analysis = await analyseScenarioResult(result, audioContext, decode);
+
+    expect(decode).toHaveBeenCalledTimes(result.project.tracks.length);
+    expect(decode.mock.calls.map((call) => call[0])).toEqual(
+      result.project.tracks.map((t) => t.takes[0].mediaRef)
+    );
+    expect(analysis.tracks.map((t) => t.trackId)).toEqual(result.project.tracks.map((t) => t.id));
+    expect(analysis.tracks.map((t) => t.label)).toEqual(
+      result.project.tracks.map((t) => t.name)
+    );
+    // Carries the simulated latency the run was made with, so a calibration
+    // run can't be mistaken for a real measurement (ADR 0004).
+    expect(analysis.simulatedLatencyMs).toBe(30);
   });
 });

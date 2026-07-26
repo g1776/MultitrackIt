@@ -14,13 +14,17 @@ import {
 } from "../../src/diagnostics/report";
 import { EngineEventLog } from "../../src/diagnostics/eventLog";
 import {
+  analyseScenarioResult,
   DEFAULT_SCENARIO_PARAMS,
   runSyntheticScenario,
   type ScenarioParams,
   type ScenarioProgress,
 } from "../../src/diagnostics/scenario";
 
-type ConfigurableScenarioParams = Pick<ScenarioParams, "trackCount" | "tempoBpm" | "beatCount">;
+type ConfigurableScenarioParams = Pick<
+  ScenarioParams,
+  "trackCount" | "tempoBpm" | "beatCount" | "simulatedLatencyMs"
+>;
 
 /**
  * The diagnostics instrument, deliberately separate from the recording UI
@@ -44,6 +48,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
     trackCount: DEFAULT_SCENARIO_PARAMS.trackCount,
     tempoBpm: DEFAULT_SCENARIO_PARAMS.tempoBpm,
     beatCount: DEFAULT_SCENARIO_PARAMS.beatCount,
+    simulatedLatencyMs: DEFAULT_SCENARIO_PARAMS.simulatedLatencyMs,
   });
   const [scenarioRunning, setScenarioRunning] = useState(false);
   const [scenarioProgress, setScenarioProgress] = useState<ScenarioProgress | null>(null);
@@ -65,6 +70,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
         audioClock: playbackAdapter.getAudioClockSession() ?? null,
         audioProcessing: captureAdapter.getAudioProcessing() ?? null,
         scenario: null,
+        analysis: null,
       });
       setWrittenPath(await diagnosticsStorage.writeReport(report));
     } catch (e) {
@@ -96,12 +102,14 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
         params: scenarioParams,
         onProgress: setScenarioProgress,
       });
+      const analysis = await analyseScenarioResult(result, playbackAdapter.getAudioContext());
       const report = buildReport(scenarioEvents.getEvents(), {
         createdAt: new Date().toISOString(),
         project: summariseProject(result.project),
         audioClock: playbackAdapter.getAudioClockSession() ?? null,
         audioProcessing: null,
         scenario: result.params,
+        analysis,
       });
       setScenarioWrittenPath(await diagnosticsStorage.writeReport(report));
     } catch (e) {
@@ -212,10 +220,28 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
             }
           />
         </label>
+        <label>
+          Simulated latency (ms)
+          <input
+            type="number"
+            min={0}
+            value={scenarioParams.simulatedLatencyMs}
+            disabled={scenarioRunning}
+            onChange={(e) =>
+              setScenarioParams((p) => ({ ...p, simulatedLatencyMs: Number(e.target.value) }))
+            }
+          />
+        </label>
         <button onClick={() => void runScenario()} disabled={scenarioRunning}>
           {scenarioRunning ? "Running…" : "Run Synthetic Scenario"}
         </button>
       </div>
+      {scenarioParams.simulatedLatencyMs > 0 && (
+        <p className="hint">
+          Simulating {scenarioParams.simulatedLatencyMs}ms of capture latency — this run is a
+          calibration check, not a measurement of the app. Set it back to 0 for a real reading.
+        </p>
+      )}
 
       {scenarioProgress && (
         <p className="value">

@@ -29,6 +29,7 @@ describe("FakeDiagnosticsStorageAdapter", () => {
         guide: { includeInMonitorMix: true, includeInMixdown: false },
       },
       scenario: null,
+      analysis: null,
     }
   );
 

@@ -61,20 +61,51 @@ function renderBeep(channel: Float32Array, atMs: number, frequencyHz: number): v
 }
 
 /**
+ * Renders one beep per `atMsList` entry, at `pitchHz`, into a buffer covering
+ * `totalDurationMs`. The lower-level primitive under `renderSyntheticTake`,
+ * exposed separately so a test (or the simulated-latency control) can render
+ * beeps at arbitrary times rather than only at a perfect beat grid — the
+ * beat grid times remain the *expected* times an analysis compares against
+ * regardless of where a signal was actually rendered.
+ */
+export function renderBeepsAtTimes(
+  atMsList: number[],
+  pitchHz: number,
+  totalDurationMs: number
+): Float32Array {
+  const totalSamples = Math.ceil((totalDurationMs / 1000) * SYNTHETIC_SAMPLE_RATE);
+  const channel = new Float32Array(totalSamples);
+
+  for (const atMs of atMsList) {
+    renderBeep(channel, atMs, pitchHz);
+  }
+
+  return channel;
+}
+
+/**
  * Renders the media a flawless performer would have produced for one Take:
  * one beep per beat at `computeSyntheticBeatGrid`'s times, at `pitchHz`. Pure
  * sample synthesis, decoupled from WAV encoding so the signal itself can be
  * asserted on without decoding a container format.
+ *
+ * `latencyMs` shifts every rendered beep by a fixed amount, simulating a
+ * capture device that delivers the signal late (ADR 0004's
+ * `simulatedLatencyMs`). It leaves `computeSyntheticBeatGrid` itself
+ * unshifted — that stays the *expected* grid an analysis compares the
+ * (deliberately displaced) captured signal against, which is the whole
+ * point of the control: a harness that always reports zero error is
+ * indistinguishable from a correct one until it can be made to report a
+ * known non-zero value.
  */
-export function renderSyntheticTake(params: SyntheticSignalParams, pitchHz: number): Float32Array {
+export function renderSyntheticTake(
+  params: SyntheticSignalParams,
+  pitchHz: number,
+  latencyMs = 0
+): Float32Array {
   const beatIntervalMs = 60000 / params.bpm;
   const totalDurationMs = params.beatCount * beatIntervalMs;
-  const totalSamples = Math.ceil((totalDurationMs / 1000) * SYNTHETIC_SAMPLE_RATE);
-  const channel = new Float32Array(totalSamples);
+  const atMsList = computeSyntheticBeatGrid(params).map((click) => click.atMs + latencyMs);
 
-  for (const click of computeSyntheticBeatGrid(params)) {
-    renderBeep(channel, click.atMs, pitchHz);
-  }
-
-  return channel;
+  return renderBeepsAtTimes(atMsList, pitchHz, totalDurationMs);
 }

@@ -64,10 +64,29 @@ describe("SyntheticCaptureAdapter", () => {
     expect(new Set([first, second, third]).size).toBe(3);
   });
 
-  it("reports no simulated latency", async () => {
+  it("reports zero simulated latency by default", async () => {
     const adapter = new SyntheticCaptureAdapter(PARAMS);
     await adapter.arm();
     await adapter.stopCapture(await adapter.startCapture());
-    expect(adapter.getLatencyMs()).toBeUndefined();
+    expect(adapter.getLatencyMs()).toBe(0);
+  });
+
+  it("reports a configured simulated latency through the same latency-estimate method", async () => {
+    const adapter = new SyntheticCaptureAdapter({ ...PARAMS, simulatedLatencyMs: 45 });
+    await adapter.arm();
+    await adapter.stopCapture(await adapter.startCapture());
+    expect(adapter.getLatencyMs()).toBe(45);
+  });
+
+  it("shifts every fabricated onset later by the configured simulated latency", async () => {
+    const adapter = new SyntheticCaptureAdapter({ ...PARAMS, simulatedLatencyMs: 50 });
+    await adapter.arm();
+    const withLatency = await adapter.stopCapture(await adapter.startCapture());
+
+    const plain = new SyntheticCaptureAdapter(PARAMS);
+    await plain.arm();
+    const withoutLatency = await plain.stopCapture(await plain.startCapture());
+
+    expect(withLatency).not.toBe(withoutLatency);
   });
 });

@@ -32,6 +32,7 @@ function report(events: TimestampedEngineEvent[]) {
     audioClock: AUDIO_CLOCK,
     audioProcessing: null,
     scenario: null,
+    analysis: null,
   });
 }
 
@@ -160,6 +161,7 @@ describe("buildReport audioClock", () => {
       audioClock: null,
       audioProcessing: null,
       scenario: null,
+      analysis: null,
     });
 
     expect(built.audioClock).toBeNull();
@@ -179,6 +181,7 @@ describe("buildReport audioProcessing", () => {
       audioClock: AUDIO_CLOCK,
       audioProcessing,
       scenario: null,
+      analysis: null,
     });
 
     expect(built.audioProcessing).toEqual(audioProcessing);
@@ -192,13 +195,21 @@ describe("buildReport audioProcessing", () => {
 
 describe("buildReport scenario", () => {
   it("states the scenario parameters a synthetic run was made with, so it's reproducible from its own report", () => {
-    const scenario = { trackCount: 3, tempoBpm: 100, beatsPerBar: 4, beatCount: 16, armDelayMs: 0 };
+    const scenario = {
+      trackCount: 3,
+      tempoBpm: 100,
+      beatsPerBar: 4,
+      beatCount: 16,
+      armDelayMs: 0,
+      simulatedLatencyMs: 0,
+    };
     const built = buildReport([], {
       createdAt: CREATED_AT,
       project: PROJECT,
       audioClock: AUDIO_CLOCK,
       audioProcessing: null,
       scenario,
+      analysis: null,
     });
 
     expect(built.scenario).toEqual(scenario);
@@ -206,6 +217,42 @@ describe("buildReport scenario", () => {
 
   it("is null for an ordinary manual pass", () => {
     expect(report([]).scenario).toBeNull();
+  });
+});
+
+describe("buildReport analysis", () => {
+  it("carries the per-Track onset/error analysis a synthetic scenario produced", () => {
+    const analysis = {
+      simulatedLatencyMs: 0,
+      tracks: [
+        {
+          trackId: "track-1",
+          label: "Track 1",
+          sampleRate: 44100,
+          durationMs: 9600,
+          expectedBeatTimesMs: [0, 600],
+          detectedOnsetsMs: [0, 600],
+          perBeatErrorMs: [0, 0],
+          missingBeatIndices: [],
+          spuriousOnsetsMs: [],
+          peaks: [0.8, 0.1],
+        },
+      ],
+    };
+    const built = buildReport([], {
+      createdAt: CREATED_AT,
+      project: PROJECT,
+      audioClock: AUDIO_CLOCK,
+      audioProcessing: null,
+      scenario: null,
+      analysis,
+    });
+
+    expect(built.analysis).toEqual(analysis);
+  });
+
+  it("is null for a pass with no analysis yet", () => {
+    expect(report([]).analysis).toBeNull();
   });
 });
 

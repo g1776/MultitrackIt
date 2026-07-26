@@ -3,6 +3,10 @@ import type { EngineEventSink } from "../engine/events";
 import { RecordingEngine } from "../engine/RecordingEngine";
 import type { Project } from "../engine/types";
 import { SyntheticCaptureAdapter } from "../adapters/syntheticCaptureAdapter";
+import { decodeMediaRef } from "../adapters/audioDecode";
+import { analyseScenario, type DecodedTrack } from "./analysis";
+import { computeSyntheticBeatGrid } from "./syntheticSignal";
+import type { AnalysisResult } from "./types";
 
 export interface ScenarioParams {
   trackCount: number;
@@ -19,14 +23,23 @@ export interface ScenarioParams {
    * ever landing on the Padding or Count-in.
    */
   armDelayMs: number;
+  /**
+   * Simulated capture-device latency (ms), threaded to the
+   * `SyntheticCaptureAdapter`. Zero by default, matching a healthy device —
+   * a normal run should measure the app, not a fabricated error. Set this to
+   * calibrate the instrument: a harness that always reports zero error is
+   * indistinguishable from a correct one until it can be made to report a
+   * known non-zero value (ADR 0004).
+   */
+  simulatedLatencyMs: number;
 }
 
 /**
- * Three Tracks, 100bpm, 4/4, 16 beats, no simulated arm delay (ADR 0004).
- * 100bpm is deliberate: 600ms between onsets means an onset detector can't
- * plausibly confuse adjacent beats, so an early harness bug presents as an
- * obviously wrong number rather than a subtly wrong one. 16 beats is long
- * enough for drift to accumulate visibly.
+ * Three Tracks, 100bpm, 4/4, 16 beats, no simulated arm delay or latency
+ * (ADR 0004). 100bpm is deliberate: 600ms between onsets means an onset
+ * detector can't plausibly confuse adjacent beats, so an early harness bug
+ * presents as an obviously wrong number rather than a subtly wrong one. 16
+ * beats is long enough for drift to accumulate visibly.
  */
 export const DEFAULT_SCENARIO_PARAMS: ScenarioParams = {
   trackCount: 3,
@@ -34,6 +47,7 @@ export const DEFAULT_SCENARIO_PARAMS: ScenarioParams = {
   beatsPerBar: 4,
   beatCount: 16,
   armDelayMs: 0,
+  simulatedLatencyMs: 0,
 };
 
 export interface ScenarioProgress {
@@ -78,6 +92,7 @@ function resolveParams(overrides: Partial<ScenarioParams> | undefined): Scenario
   if (!(params.beatsPerBar > 0)) throw new Error("beatsPerBar must be positive");
   if (!(params.beatCount > 0)) throw new Error("beatCount must be positive");
   if (params.armDelayMs < 0) throw new Error("armDelayMs must not be negative");
+  if (params.simulatedLatencyMs < 0) throw new Error("simulatedLatencyMs must not be negative");
   return params;
 }
 
@@ -108,6 +123,7 @@ export async function runSyntheticScenario(
     beatsPerBar: params.beatsPerBar,
     beatCount: params.beatCount,
     armDelayMs: params.armDelayMs,
+    simulatedLatencyMs: params.simulatedLatencyMs,
   });
   const engine = new RecordingEngine(capture, options.playback, {
     countIn: options.countIn,
@@ -135,4 +151,39 @@ export async function runSyntheticScenario(
 
   // Set by createProject just above; the loop above cannot have cleared it.
   return { project: engine.getActiveProject() as Project, params };
+}
+
+/**
+ * Decodes every recorded Track's selected Take and analyses each
+ * independently against the beat grid the scenario was run with (ADR 0004)
+ * — one signed error per beat per Track, so one Track's problem can't
+ * contaminate another's measurement.
+ *
+ * The only place this function touches a browser audio API is through
+ * `decode` (defaulting to the real `decodeMediaRef`), so a test can
+ * substitute a fake without needing an `AudioContext`; everything after
+ * decoding is the pure `analyseScenario`.
+ */
+export async function analyseScenarioResult(
+  result: ScenarioResult,
+  audioContext: AudioContext,
+  decode: typeof decodeMediaRef = decodeMediaRef
+): Promise<AnalysisResult> {
+  const decodedTracks: DecodedTrack[] = await Promise.all(
+    result.project.tracks.map(async (track) => {
+      const take = track.takes.find((t) => t.id === track.selectedTakeId);
+      const decoded = take
+        ? await decode(take.mediaRef, audioContext)
+        : { samples: new Float32Array(0), sampleRate: audioContext.sampleRate };
+      return { trackId: track.id, label: track.name, ...decoded };
+    })
+  );
+
+  const expectedBeatTimesMs = computeSyntheticBeatGrid({
+    bpm: result.params.tempoBpm,
+    beatsPerBar: result.params.beatsPerBar,
+    beatCount: result.params.beatCount,
+  }).map((click) => click.atMs);
+
+  return analyseScenario(decodedTracks, expectedBeatTimesMs, result.params.simulatedLatencyMs);
 }
