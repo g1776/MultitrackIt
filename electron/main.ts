@@ -1,7 +1,12 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
-import type { StoredMediaFile, StoredProjectSnapshot, StoredProjectSummary } from "./ipcTypes";
+import type {
+  StoredDiagnosticsReport,
+  StoredMediaFile,
+  StoredProjectSnapshot,
+  StoredProjectSummary,
+} from "./ipcTypes";
 
 const isDev = !app.isPackaged;
 
@@ -81,6 +86,45 @@ async function listProjects(): Promise<StoredProjectSummary[]> {
   );
   return summaries.filter((s): s is StoredProjectSummary => s !== null);
 }
+
+/** The gitignored directory diagnostics reports are written to, relative to the repository root. */
+const DIAGNOSTICS_DIR_NAME = "diagnostics";
+
+/**
+ * Diagnostics reports go to the repository root rather than the conventional
+ * `userData` location, because they are a channel to a coding agent reading
+ * the repository, not user-facing artifacts — a stable repo-relative path
+ * removes the need to relay absolute paths (ADR 0004). `getAppPath()` is that
+ * root when running from source, which is the only way this instrument is
+ * meant to be used.
+ */
+function diagnosticsDir(): string {
+  return path.join(app.getAppPath(), DIAGNOSTICS_DIR_NAME);
+}
+
+/** Writes a report and returns its repository-relative path, for the panel to display. */
+async function writeDiagnosticsReport(
+  fileName: string,
+  report: StoredDiagnosticsReport
+): Promise<string> {
+  // Guard the file name rather than trusting it: it reaches the main process
+  // over IPC, and a name containing a path separator would write outside the
+  // diagnostics directory entirely.
+  if (fileName !== path.basename(fileName)) {
+    throw new Error(`Invalid diagnostics report name: ${fileName}`);
+  }
+  await fs.mkdir(diagnosticsDir(), { recursive: true });
+  await fs.writeFile(
+    path.join(diagnosticsDir(), fileName),
+    JSON.stringify(report, null, 2),
+    "utf-8"
+  );
+  return `${DIAGNOSTICS_DIR_NAME}/${fileName}`;
+}
+
+ipcMain.handle("diagnostics:write", (_event, fileName: string, report: StoredDiagnosticsReport) =>
+  writeDiagnosticsReport(fileName, report)
+);
 
 ipcMain.handle("project:save", (_event, snapshot: StoredProjectSnapshot, media: StoredMediaFile[]) =>
   saveProject(snapshot, media)

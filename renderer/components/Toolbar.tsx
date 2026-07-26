@@ -2,7 +2,16 @@ import { useProjectStore } from "../store/useProjectStore";
 import { useTransportStore } from "../store/useTransportStore";
 import { CountIn } from "./CountIn";
 
-export function Toolbar({ projectName, hasAnyRecordedTake }: { projectName: string; hasAnyRecordedTake: boolean }) {
+export function Toolbar({
+  projectName,
+  hasAnyRecordedTake,
+  onOpenDiagnostics,
+}: {
+  projectName: string;
+  hasAnyRecordedTake: boolean;
+  /** Opens the Diagnostics panel, which closes itself. The panel's own affordances stay in the panel — only its door is here. */
+  onOpenDiagnostics: () => void;
+}) {
   const saveProject = useProjectStore((s) => s.saveProject);
   const isSaving = useProjectStore((s) => s.isSaving);
   const trackCount = useProjectStore((s) => s.project?.tracks.length ?? 0);
@@ -32,6 +41,7 @@ export function Toolbar({ projectName, hasAnyRecordedTake }: { projectName: stri
             {isPlaying ? "Stop" : "Play All Tracks"}
           </button>
         )}
+        <button onClick={onOpenDiagnostics}>Diagnostics</button>
       </div>
 
       <CountIn />

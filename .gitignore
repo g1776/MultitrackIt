@@ -3,3 +3,8 @@ dist/
 dist-electron/
 release/
 *.log
+# Diagnostics reports (ADR 0004): a channel to a coding agent reading the
+# repository, written here rather than to userData so the path is stable and
+# repo-relative — but never committed. Leading slash anchors this to the
+# repository root: unanchored, it would also swallow `src/diagnostics/`.
+/diagnostics/
