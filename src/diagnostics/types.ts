@@ -18,6 +18,27 @@ export interface CountInMeasurement extends IntervalMeasurement {
 }
 
 /**
+ * What the pass ran against. The Guide is stated explicitly, including when
+ * there isn't one, because its absence is otherwise invisible: a Project with
+ * no Guide, and one whose Guide is excluded from the Monitor Mix, both
+ * produce a schedule with no Guide entry — identical to having forgotten to
+ * import or generate one. Since the Guide is what sits at the timeline's zero
+ * point, a run without it measures a different offset path than normal use
+ * (ADR 0004), so a report that can't distinguish the two is misleading.
+ */
+export interface ProjectSummary {
+  name: string;
+  tempoBpm: number;
+  beatsPerBar: number;
+  guide: {
+    /** Whether the Guide is audible in the Monitor Mix — i.e. whether it sounded during a recording pass. */
+    includeInMonitorMix: boolean;
+    /** Whether the Guide is unmuted in composite playback — i.e. whether it sounded during a playback pass. */
+    includeInMixdown: boolean;
+  } | null;
+}
+
+/**
  * A written record of one recording or playback pass: the Project it ran
  * against, the lead-in as both asked for and measured, and the full event
  * timeline including every schedule entry's computed start time and
@@ -26,11 +47,7 @@ export interface CountInMeasurement extends IntervalMeasurement {
 export interface DiagnosticsReport {
   /** ISO 8601 wall-clock time the report was written — the report's identity, and its file name. */
   createdAt: string;
-  project: {
-    name: string;
-    tempoBpm: number;
-    beatsPerBar: number;
-  } | null;
+  project: ProjectSummary | null;
   padding: IntervalMeasurement;
   countIn: CountInMeasurement;
   events: TimestampedEngineEvent[];

@@ -1,10 +1,44 @@
 import type { EngineEvent, TimestampedEngineEvent } from "../engine/events";
-import type { CountInMeasurement, DiagnosticsReport, IntervalMeasurement } from "./types";
+import type { Project } from "../engine/types";
+import type {
+  CountInMeasurement,
+  DiagnosticsReport,
+  IntervalMeasurement,
+  ProjectSummary,
+} from "./types";
 
 export interface ReportContext {
   /** ISO 8601 wall-clock time the report was written. */
   createdAt: string;
-  project: DiagnosticsReport["project"];
+  project: ProjectSummary | null;
+}
+
+/**
+ * Reduces the active Project to what a report says about it. Shared by the
+ * report and by the panel's own sanity check, so a warning on screen and the
+ * file written next to it can never disagree about whether there was a Guide.
+ */
+export function summariseProject(project: Project | null): ProjectSummary | null {
+  if (!project) return null;
+  return {
+    name: project.name,
+    tempoBpm: project.tempoBpm,
+    beatsPerBar: project.beatsPerBar,
+    guide: project.guide && {
+      includeInMonitorMix: project.guide.includeInMonitorMix,
+      includeInMixdown: project.guide.includeInMixdown,
+    },
+  };
+}
+
+/**
+ * Whether this Project would produce a pass with no Guide sounding — either
+ * because none was imported or generated, or because it's excluded from the
+ * Monitor Mix. Worth surfacing before a report is written: it is the most
+ * likely way to record a diagnostics pass that measures the wrong thing.
+ */
+export function guideWouldBeSilentWhileRecording(project: ProjectSummary | null): boolean {
+  return !project?.guide?.includeInMonitorMix;
 }
 
 /**

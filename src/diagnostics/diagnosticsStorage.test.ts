@@ -17,7 +17,15 @@ describe("FakeDiagnosticsStorageAdapter", () => {
       },
       { type: "capture-started", trackId: "track-2", atMs: 3401 },
     ],
-    { createdAt: "2026-07-25T12:00:00.000Z", project: { name: "My Song", tempoBpm: 100, beatsPerBar: 4 } }
+    {
+      createdAt: "2026-07-25T12:00:00.000Z",
+      project: {
+        name: "My Song",
+        tempoBpm: 100,
+        beatsPerBar: 4,
+        guide: { includeInMonitorMix: true, includeInMixdown: false },
+      },
+    }
   );
 
   it("round-trips a report unchanged", async () => {

@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { diagnosticsStorage, engine, engineEventLog } from "../store/engine";
-import { buildReport } from "../../src/diagnostics/report";
+import {
+  buildReport,
+  guideWouldBeSilentWhileRecording,
+  summariseProject,
+} from "../../src/diagnostics/report";
 
 /**
  * The diagnostics instrument, deliberately separate from the recording UI
@@ -20,17 +24,15 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
   // path. Re-reading on demand is enough for an instrument driven by hand.
   const [events, setEvents] = useState(() => engineEventLog.getEvents());
 
+  const project = summariseProject(engine.getActiveProject());
+  const guideSilent = guideWouldBeSilentWhileRecording(project);
+
   async function writeReport(): Promise<void> {
     setError(null);
     try {
-      const project = engine.getActiveProject();
       const report = buildReport(engineEventLog.getEvents(), {
         createdAt: new Date().toISOString(),
-        project: project && {
-          name: project.name,
-          tempoBpm: project.tempoBpm,
-          beatsPerBar: project.beatsPerBar,
-        },
+        project: summariseProject(engine.getActiveProject()),
       });
       setWrittenPath(await diagnosticsStorage.writeReport(report));
     } catch (e) {
@@ -68,6 +70,15 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
           ? "No events recorded yet — record a Take or play back."
           : `${events.length} event(s) recorded.`}
       </p>
+      {guideSilent && (
+        <p className="hint">
+          {project?.guide
+            ? "The Guide is excluded from the Monitor Mix, so it won't sound while recording."
+            : "No Guide imported."}{" "}
+          A pass recorded this way exercises a different Offset path than normal use, so its
+          numbers won't describe the case you're chasing.
+        </p>
+      )}
       {writtenPath && <p className="hint">Wrote {writtenPath}</p>}
       {error && <p className="error">{error}</p>}
     </section>

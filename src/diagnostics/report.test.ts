@@ -1,8 +1,26 @@
 import { describe, it, expect } from "vitest";
-import { buildReport, reportFileName } from "./report";
+import {
+  buildReport,
+  guideWouldBeSilentWhileRecording,
+  reportFileName,
+  summariseProject,
+} from "./report";
 import type { TimestampedEngineEvent } from "../engine/events";
+import type { Project } from "../engine/types";
 
-const PROJECT = { name: "My Song", tempoBpm: 100, beatsPerBar: 4 };
+const PROJECT = { name: "My Song", tempoBpm: 100, beatsPerBar: 4, guide: null };
+
+function project(guide: Project["guide"]): Project {
+  return {
+    id: "project-1",
+    name: "My Song",
+    createdAt: 0,
+    tracks: [],
+    guide,
+    tempoBpm: 100,
+    beatsPerBar: 4,
+  };
+}
 const CREATED_AT = "2026-07-25T12:00:00.000Z";
 
 function report(events: TimestampedEngineEvent[]) {
@@ -69,6 +87,59 @@ describe("buildReport", () => {
     expect(built.events).toEqual(events);
     expect(built.project).toEqual(PROJECT);
     expect(built.createdAt).toBe(CREATED_AT);
+  });
+});
+
+describe("summariseProject", () => {
+  it("states an absent Guide explicitly rather than by omission", () => {
+    expect(summariseProject(project(null))).toEqual({
+      name: "My Song",
+      tempoBpm: 100,
+      beatsPerBar: 4,
+      guide: null,
+    });
+  });
+
+  it("states whether a Guide that exists would actually sound in each kind of pass", () => {
+    const summary = summariseProject(
+      project({ mediaRef: "guide-media", includeInMonitorMix: true, includeInMixdown: false })
+    );
+
+    expect(summary?.guide).toEqual({ includeInMonitorMix: true, includeInMixdown: false });
+  });
+
+  it("keeps the Guide's mediaRef out of the report — a blob handle means nothing later", () => {
+    const summary = summariseProject(
+      project({ mediaRef: "blob:xyz", includeInMonitorMix: true, includeInMixdown: true })
+    );
+
+    expect(JSON.stringify(summary)).not.toContain("blob:xyz");
+  });
+
+  it("has no Project to summarise before one is open", () => {
+    expect(summariseProject(null)).toBeNull();
+  });
+});
+
+describe("guideWouldBeSilentWhileRecording", () => {
+  it("flags a Project with no Guide at all", () => {
+    expect(guideWouldBeSilentWhileRecording(summariseProject(project(null)))).toBe(true);
+  });
+
+  it("flags a Guide excluded from the Monitor Mix — imported, but silent while recording", () => {
+    const summary = summariseProject(
+      project({ mediaRef: "guide-media", includeInMonitorMix: false, includeInMixdown: true })
+    );
+
+    expect(guideWouldBeSilentWhileRecording(summary)).toBe(true);
+  });
+
+  it("stays quiet when a Guide will sound", () => {
+    const summary = summariseProject(
+      project({ mediaRef: "guide-media", includeInMonitorMix: true, includeInMixdown: false })
+    );
+
+    expect(guideWouldBeSilentWhileRecording(summary)).toBe(false);
   });
 });
 
