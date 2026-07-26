@@ -5,8 +5,11 @@ import type {
   AudioClockSession,
   AudioProcessingState,
   CountInMeasurement,
+  DiagnosticsMode,
   DiagnosticsReport,
   IntervalMeasurement,
+  LoopbackAnalysisResult,
+  LoopbackSummary,
   ProjectSummary,
   ScenarioSummary,
 } from "./types";
@@ -22,6 +25,10 @@ export interface ReportContext {
   scenario: ScenarioSummary | null;
   /** The per-Track onset/error analysis, once a synthetic scenario's Takes have been analysed; null otherwise. */
   analysis: AnalysisResult | null;
+  /** The parameters a Mode A acoustic-loopback run was made with; null for anything else. */
+  loopback: LoopbackSummary | null;
+  /** The loopback run's own analysis, once its capture has been analysed; null otherwise. */
+  loopbackAnalysis: LoopbackAnalysisResult | null;
 }
 
 /**
@@ -119,13 +126,24 @@ export function buildReport(
     delayAfterCountInMs: elapsedMs(events, "count-in-ended", "capture-started"),
   };
 
+  // Derived, never asked for directly: a report can't disagree with itself
+  // about what produced it (ADR 0004).
+  const mode: DiagnosticsMode = context.loopback
+    ? "loopback"
+    : context.scenario
+      ? "synthetic"
+      : "manual";
+
   return {
     createdAt: context.createdAt,
+    mode,
     project: context.project,
     audioClock: context.audioClock,
     audioProcessing: context.audioProcessing,
     scenario: context.scenario,
     analysis: context.analysis,
+    loopback: context.loopback,
+    loopbackAnalysis: context.loopbackAnalysis,
     padding,
     countIn,
     captureStart,

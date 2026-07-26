@@ -168,6 +168,37 @@ export interface AnalysisResult {
 }
 
 /**
+ * Which kind of pass produced a report: an ordinary manual pass, a Mode B
+ * synthetic-capture scenario, or a Mode A acoustic-loopback run (ADR 0004).
+ * Derived from which of `scenario`/`loopback` is present, so a report can
+ * never disagree with itself about what produced it.
+ */
+export type DiagnosticsMode = "manual" | "synthetic" | "loopback";
+
+/**
+ * The parameters a Mode A acoustic-loopback run was made with (ADR 0004), so
+ * the run is reproducible from its own report.
+ */
+export interface LoopbackSummary {
+  bpm: number;
+  beatsPerBar: number;
+  beatCount: number;
+}
+
+/**
+ * Mode A's own analysis: the microphone capture treated as a single Track,
+ * plus the round-trip latency figure derived from it. `roundTripLatencyMs`
+ * is null exactly when `noOnsetsDetected` is true — a probable
+ * headphones-or-muted-speakers condition must be stated plainly rather than
+ * emitting a spurious offset (ADR 0004).
+ */
+export interface LoopbackAnalysisResult {
+  track: TrackAnalysis;
+  roundTripLatencyMs: number | null;
+  noOnsetsDetected: boolean;
+}
+
+/**
  * A written record of one recording or playback pass: the Project it ran
  * against, the lead-in as both asked for and measured, and the full event
  * timeline including every schedule entry's computed start time and
@@ -176,6 +207,7 @@ export interface AnalysisResult {
 export interface DiagnosticsReport {
   /** ISO 8601 wall-clock time the report was written — the report's identity, and its file name. */
   createdAt: string;
+  mode: DiagnosticsMode;
   project: ProjectSummary | null;
   /** The clock every `atMs` below was stamped against. Null before any AudioContext exists. */
   audioClock: AudioClockSession | null;
@@ -185,6 +217,10 @@ export interface DiagnosticsReport {
   scenario: ScenarioSummary | null;
   /** Present only once a synthetic scenario's Takes have been analysed; null otherwise. */
   analysis: AnalysisResult | null;
+  /** Present only for a Mode A acoustic-loopback run; null otherwise. */
+  loopback: LoopbackSummary | null;
+  /** Present only once a loopback run's capture has been analysed; null otherwise. */
+  loopbackAnalysis: LoopbackAnalysisResult | null;
   padding: IntervalMeasurement;
   countIn: CountInMeasurement;
   captureStart: CaptureStartMeasurement;

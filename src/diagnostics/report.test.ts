@@ -33,6 +33,8 @@ function report(events: TimestampedEngineEvent[]) {
     audioProcessing: null,
     scenario: null,
     analysis: null,
+    loopback: null,
+    loopbackAnalysis: null,
   });
 }
 
@@ -162,6 +164,8 @@ describe("buildReport audioClock", () => {
       audioProcessing: null,
       scenario: null,
       analysis: null,
+      loopback: null,
+      loopbackAnalysis: null,
     });
 
     expect(built.audioClock).toBeNull();
@@ -182,6 +186,8 @@ describe("buildReport audioProcessing", () => {
       audioProcessing,
       scenario: null,
       analysis: null,
+      loopback: null,
+      loopbackAnalysis: null,
     });
 
     expect(built.audioProcessing).toEqual(audioProcessing);
@@ -210,6 +216,8 @@ describe("buildReport scenario", () => {
       audioProcessing: null,
       scenario,
       analysis: null,
+      loopback: null,
+      loopbackAnalysis: null,
     });
 
     expect(built.scenario).toEqual(scenario);
@@ -246,6 +254,8 @@ describe("buildReport analysis", () => {
       audioProcessing: null,
       scenario: null,
       analysis,
+      loopback: null,
+      loopbackAnalysis: null,
     });
 
     expect(built.analysis).toEqual(analysis);
@@ -253,6 +263,71 @@ describe("buildReport analysis", () => {
 
   it("is null for a pass with no analysis yet", () => {
     expect(report([]).analysis).toBeNull();
+  });
+});
+
+describe("buildReport mode", () => {
+  it("is manual for an ordinary pass with no scenario or loopback", () => {
+    expect(report([]).mode).toBe("manual");
+  });
+
+  it("is synthetic when scenario params are present", () => {
+    const built = buildReport([], {
+      createdAt: CREATED_AT,
+      project: PROJECT,
+      audioClock: AUDIO_CLOCK,
+      audioProcessing: null,
+      scenario: {
+        trackCount: 3,
+        tempoBpm: 100,
+        beatsPerBar: 4,
+        beatCount: 16,
+        armDelayMs: 0,
+        simulatedLatencyMs: 0,
+      },
+      analysis: null,
+      loopback: null,
+      loopbackAnalysis: null,
+    });
+
+    expect(built.mode).toBe("synthetic");
+  });
+
+  it("is loopback when loopback params are present, distinguishing it from a synthetic run", () => {
+    const built = buildReport([], {
+      createdAt: CREATED_AT,
+      project: PROJECT,
+      audioClock: AUDIO_CLOCK,
+      audioProcessing: null,
+      scenario: null,
+      analysis: null,
+      loopback: { bpm: 100, beatsPerBar: 4, beatCount: 16 },
+      loopbackAnalysis: {
+        track: {
+          trackId: "loopback",
+          label: "Loopback",
+          sampleRate: 44100,
+          durationMs: 9600,
+          expectedBeatTimesMs: [0, 600],
+          detectedOnsetsMs: [0, 600],
+          perBeatErrorMs: [0, 0],
+          missingBeatIndices: [],
+          spuriousOnsetsMs: [],
+          peaks: [0.8, 0.1],
+        },
+        roundTripLatencyMs: 0,
+        noOnsetsDetected: false,
+      },
+    });
+
+    expect(built.mode).toBe("loopback");
+    expect(built.loopback).toEqual({ bpm: 100, beatsPerBar: 4, beatCount: 16 });
+    expect(built.loopbackAnalysis?.roundTripLatencyMs).toBe(0);
+  });
+
+  it("has no loopback data for anything else", () => {
+    expect(report([]).loopback).toBeNull();
+    expect(report([]).loopbackAnalysis).toBeNull();
   });
 });
 

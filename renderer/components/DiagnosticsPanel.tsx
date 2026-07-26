@@ -20,7 +20,12 @@ import {
   type ScenarioParams,
   type ScenarioProgress,
 } from "../../src/diagnostics/scenario";
-import type { AnalysisResult } from "../../src/diagnostics/types";
+import {
+  DEFAULT_LOOPBACK_PARAMS,
+  runLoopbackScenario,
+  type LoopbackParams,
+} from "../../src/diagnostics/loopback";
+import type { AnalysisResult, LoopbackAnalysisResult } from "../../src/diagnostics/types";
 import { WaveformCanvas } from "./WaveformCanvas";
 
 type ConfigurableScenarioParams = Pick<
@@ -58,6 +63,12 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
   const [scenarioError, setScenarioError] = useState<string | null>(null);
   const [scenarioAnalysis, setScenarioAnalysis] = useState<AnalysisResult | null>(null);
 
+  const [loopbackParams, setLoopbackParams] = useState<LoopbackParams>(DEFAULT_LOOPBACK_PARAMS);
+  const [loopbackRunning, setLoopbackRunning] = useState(false);
+  const [loopbackWrittenPath, setLoopbackWrittenPath] = useState<string | null>(null);
+  const [loopbackError, setLoopbackError] = useState<string | null>(null);
+  const [loopbackAnalysis, setLoopbackAnalysis] = useState<LoopbackAnalysisResult | null>(null);
+
   const project = summariseProject(engine.getActiveProject());
   const guideSilent = guideWouldBeSilentWhileRecording(project);
   // Read at render (like the log itself) rather than held in state: it changes
@@ -74,6 +85,8 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
         audioProcessing: captureAdapter.getAudioProcessing() ?? null,
         scenario: null,
         analysis: null,
+        loopback: null,
+        loopbackAnalysis: null,
       });
       setWrittenPath(await diagnosticsStorage.writeReport(report));
     } catch (e) {
@@ -115,12 +128,51 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
         audioProcessing: null,
         scenario: result.params,
         analysis,
+        loopback: null,
+        loopbackAnalysis: null,
       });
       setScenarioWrittenPath(await diagnosticsStorage.writeReport(report));
     } catch (e) {
       setScenarioError((e as Error).message);
     } finally {
       setScenarioRunning(false);
+    }
+  }
+
+  /**
+   * Runs Mode A end to end (ADR 0004): plays the synthetic signal through
+   * the speakers and captures it back through the microphone, with no human
+   * performing, then writes its own report — distinct from the Synthetic
+   * Sync Scenario's report via `mode: "loopback"` (issue #21). Requires
+   * speakers, not headphones — a run over headphones or with muted speakers
+   * surfaces below as "no onsets detected", not a spurious number.
+   */
+  async function runLoopback(): Promise<void> {
+    setLoopbackError(null);
+    setLoopbackWrittenPath(null);
+    setLoopbackAnalysis(null);
+    setLoopbackRunning(true);
+    try {
+      const { params, analysis } = await runLoopbackScenario({
+        audioContext: playbackAdapter.getAudioContext(),
+        params: loopbackParams,
+      });
+      setLoopbackAnalysis(analysis);
+      const report = buildReport([], {
+        createdAt: new Date().toISOString(),
+        project: null,
+        audioClock: playbackAdapter.getAudioClockSession() ?? null,
+        audioProcessing: null,
+        scenario: null,
+        analysis: null,
+        loopback: params,
+        loopbackAnalysis: analysis,
+      });
+      setLoopbackWrittenPath(await diagnosticsStorage.writeReport(report));
+    } catch (e) {
+      setLoopbackError((e as Error).message);
+    } finally {
+      setLoopbackRunning(false);
     }
   }
 
@@ -258,6 +310,70 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
       {scenarioWrittenPath && <p className="hint">Wrote {scenarioWrittenPath}</p>}
       {scenarioError && <p className="error">{scenarioError}</p>}
       {scenarioAnalysis && <WaveformCanvas analysis={scenarioAnalysis} />}
+
+      <h3>Acoustic Loopback</h3>
+      <p className="hint">
+        Plays the synthetic signal through the speakers and captures it back through the
+        microphone, with no human performing — a true round-trip latency figure for this
+        machine. Requires speakers: over headphones or with speakers muted, no onsets will be
+        detected. Its numbers are environment-specific, not a portable assertion. Writes its own
+        report, distinct from the Synthetic Sync Scenario's.
+      </p>
+
+      <div className="panel">
+        <label>
+          Tempo (bpm)
+          <input
+            type="number"
+            min={1}
+            value={loopbackParams.bpm}
+            disabled={loopbackRunning}
+            onChange={(e) => setLoopbackParams((p) => ({ ...p, bpm: Number(e.target.value) }))}
+          />
+        </label>
+        <label>
+          Beats per bar
+          <input
+            type="number"
+            min={1}
+            value={loopbackParams.beatsPerBar}
+            disabled={loopbackRunning}
+            onChange={(e) =>
+              setLoopbackParams((p) => ({ ...p, beatsPerBar: Number(e.target.value) }))
+            }
+          />
+        </label>
+        <label>
+          Beats
+          <input
+            type="number"
+            min={1}
+            value={loopbackParams.beatCount}
+            disabled={loopbackRunning}
+            onChange={(e) =>
+              setLoopbackParams((p) => ({ ...p, beatCount: Number(e.target.value) }))
+            }
+          />
+        </label>
+        <button onClick={() => void runLoopback()} disabled={loopbackRunning}>
+          {loopbackRunning ? "Running…" : "Run Acoustic Loopback"}
+        </button>
+      </div>
+
+      {loopbackAnalysis && loopbackAnalysis.noOnsetsDetected && (
+        <p className="hint">
+          No onsets detected — likely headphones instead of speakers, or speakers muted. Check
+          your output device and try again.
+        </p>
+      )}
+      {loopbackAnalysis && !loopbackAnalysis.noOnsetsDetected && (
+        <p className="value">Round-trip latency: {loopbackAnalysis.roundTripLatencyMs}ms</p>
+      )}
+      {loopbackWrittenPath && <p className="hint">Wrote {loopbackWrittenPath}</p>}
+      {loopbackError && <p className="error">{loopbackError}</p>}
+      {loopbackAnalysis && (
+        <WaveformCanvas analysis={{ simulatedLatencyMs: 0, tracks: [loopbackAnalysis.track] }} />
+      )}
     </section>
   );
 }

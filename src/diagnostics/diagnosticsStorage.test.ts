@@ -30,6 +30,8 @@ describe("FakeDiagnosticsStorageAdapter", () => {
       },
       scenario: null,
       analysis: null,
+      loopback: null,
+      loopbackAnalysis: null,
     }
   );
 
