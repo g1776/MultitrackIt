@@ -71,7 +71,7 @@ gh issue edit <n> --body-file -
 - If this was its only remaining open blocker, note that it's now unblocked — strike or remove the `Blocked by #<n>` reference (or the native dependency edge) and leave a short comment saying what unblocked it.
 - Don't relabel that ticket's triage state yourself (e.g. don't decide it's now `ready-for-agent`) — that's a judgment call for `/triage`, not this skill. Mention to the user that it's now unblocked and worth a `/triage` pass.
 
-**Parent/spec tickets.** If this issue says it's a sub-issue of another (e.g. "Sub-issue of the spec #13") and that parent tracks children as a manual task list rather than native GitHub sub-issues, check off this ticket's line there too.
+**Parent/spec tickets.** This repo always uses native GitHub sub-issues (`docs/agents/issue-tracker.md`), so closing this issue already reflects on any parent automatically — no separate check or edit needed.
 
 ## 6. Triage bookkeeping (`docs/agents/triage-labels.md`)
 
