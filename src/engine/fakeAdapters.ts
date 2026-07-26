@@ -9,15 +9,50 @@ import type {
 } from "./adapters";
 import type { MetronomeClick } from "./metronome";
 
-/** In-memory capture adapter for tests: no real AV I/O. */
+/**
+ * In-memory capture adapter for tests: no real AV I/O. Models arming as its
+ * own held-open state (ADR 0005), separate from a Take's start/stop, so
+ * engine tests can assert acquisition happens once per session rather than
+ * once per Take.
+ */
 export class FakeCaptureAdapter implements CaptureAdapter {
   private nextId = 1;
+  private armedState = false;
   public startedHandles: CaptureHandle[] = [];
   public stoppedMediaRefs: string[] = [];
   /** Set to control what `getLatencyMs` reports for the next `stopCapture`. */
   public reportedLatencyMs: number | undefined = undefined;
+  /** Number of times `arm()` actually acquired — excludes no-op calls while already armed. */
+  public armCount = 0;
+  /** Number of times `disarm()` actually released — excludes no-op calls while already unarmed. */
+  public disarmCount = 0;
+  /** Set to make the next `arm()` attempt reject, simulating permission denial or an absent device. */
+  public armError: Error | undefined = undefined;
+  /** Simulated delay (ms) before `arm()` resolves, for tests observing the arming wait. */
+  public armDelayMs = 0;
+
+  isArmed(): boolean {
+    return this.armedState;
+  }
+
+  async arm(): Promise<void> {
+    if (this.armedState) return;
+    if (this.armDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.armDelayMs));
+    }
+    if (this.armError) throw this.armError;
+    this.armCount += 1;
+    this.armedState = true;
+  }
+
+  async disarm(): Promise<void> {
+    if (!this.armedState) return;
+    this.disarmCount += 1;
+    this.armedState = false;
+  }
 
   async startCapture(): Promise<CaptureHandle> {
+    if (!this.armedState) throw new Error("Cannot start capture while unarmed");
     const handle = { id: `capture-${this.nextId++}` };
     this.startedHandles.push(handle);
     return handle;

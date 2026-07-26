@@ -9,8 +9,12 @@ import {
 import { computeCountIn } from "./countIn";
 import { FakeCaptureAdapter, FakeCountInAdapter, FakePlaybackAdapter } from "./fakeAdapters";
 
-/** Options giving a recording no padding and no counted bars, so it starts capturing immediately. */
-const NO_LEAD_IN = { countInBars: 0, countInPaddingMs: 0 } as const;
+/**
+ * Options giving a recording no padding and no counted bars, so it starts
+ * capturing immediately, and disabling idle-release so tests don't leave a
+ * dangling real timer behind (arming's own tests set idleReleaseMs directly).
+ */
+const NO_LEAD_IN = { countInBars: 0, countInPaddingMs: 0, idleReleaseMs: 0 } as const;
 
 describe("RecordingEngine", () => {
   let capture: FakeCaptureAdapter;
@@ -99,6 +103,9 @@ describe("RecordingEngine", () => {
 
     it("defaults the new Take's Offset to 0 when the capture adapter doesn't implement latency reporting", async () => {
       const noLatencyCapture: import("./adapters").CaptureAdapter = {
+        arm: () => capture.arm(),
+        isArmed: () => capture.isArmed(),
+        disarm: () => capture.disarm(),
         startCapture: () => capture.startCapture(),
         stopCapture: (handle) => capture.stopCapture(handle),
       };
@@ -417,15 +424,33 @@ describe("RecordingEngine", () => {
       expect(playback.playedSchedules[0].entries[0].startAtMs).toBe(1010);
     });
 
-    it("passes through getting-ready, then counting-in, then recording", async () => {
+    it("passes through arming, then getting-ready, then counting-in, then recording on an unarmed Track", async () => {
       const leadInEngine = new RecordingEngine(capture, playback, {
         countIn,
         countInPaddingMs: 20,
+        idleReleaseMs: 0,
       });
       leadInEngine.createProject("My Song", { bpm: 240, beatsPerBar: 1 });
       const observed: string[] = [];
       leadInEngine.onStatusChange((status) => observed.push(status));
 
+      await leadInEngine.recordTake(undefined);
+
+      expect(observed).toEqual(["arming", "getting-ready", "counting-in", "recording"]);
+    });
+
+    it("skips arming on a retake, since the device is already armed", async () => {
+      const leadInEngine = new RecordingEngine(capture, playback, {
+        countIn,
+        countInPaddingMs: 20,
+        idleReleaseMs: 0,
+      });
+      leadInEngine.createProject("My Song", { bpm: 240, beatsPerBar: 1 });
+      await leadInEngine.recordTake(undefined);
+      await leadInEngine.stopRecording();
+
+      const observed: string[] = [];
+      leadInEngine.onStatusChange((status) => observed.push(status));
       await leadInEngine.recordTake(undefined);
 
       expect(observed).toEqual(["getting-ready", "counting-in", "recording"]);
@@ -485,6 +510,190 @@ describe("RecordingEngine", () => {
       await engine.recordTake(undefined);
       expect(engine.getStatus()).toBe("recording");
       expect(countIn.playedCountIns).toHaveLength(0);
+    });
+  });
+
+  describe("Arming", () => {
+    it("acquires the device on the first Take of a session", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+
+      expect(capture.armCount).toBe(1);
+      expect(engine.isArmed()).toBe(true);
+    });
+
+    it("does not acquire again for a retake — one acquisition reused across successive Takes", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      await engine.stopRecording();
+
+      await engine.recordTake(undefined);
+      await engine.stopRecording();
+      await engine.recordTake(undefined);
+
+      expect(capture.armCount).toBe(1);
+    });
+
+    it("does not release the device when a Take stops — stopCapture stops recording without disarming", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+
+      await engine.stopRecording();
+
+      expect(capture.disarmCount).toBe(0);
+      expect(engine.isArmed()).toBe(true);
+    });
+
+    it("fails at arming — before a performer has been counted in — on permission denial or an absent device", async () => {
+      engine.createProject("My Song");
+      capture.armError = new Error("Permission denied");
+
+      await expect(engine.recordTake(undefined)).rejects.toThrow("Permission denied");
+
+      expect(countIn.playedCountIns).toHaveLength(0);
+      expect(capture.startedHandles).toHaveLength(0);
+      expect(engine.isArmed()).toBe(false);
+      expect(engine.getStatus()).toBe("idle");
+    });
+
+    it("supports arming explicitly, ahead of any recordTake call", async () => {
+      engine.createProject("My Song");
+
+      await engine.arm();
+
+      expect(engine.isArmed()).toBe(true);
+      expect(capture.armCount).toBe(1);
+
+      await engine.recordTake(undefined);
+
+      expect(capture.armCount).toBe(1);
+    });
+
+    it("is a no-op to arm again while already armed", async () => {
+      engine.createProject("My Song");
+      await engine.arm();
+
+      await engine.arm();
+
+      expect(capture.armCount).toBe(1);
+    });
+
+    it("supports disarming explicitly, releasing the device", async () => {
+      engine.createProject("My Song");
+      await engine.arm();
+
+      await engine.disarm();
+
+      expect(engine.isArmed()).toBe(false);
+      expect(capture.disarmCount).toBe(1);
+    });
+
+    it("is a no-op to disarm while already unarmed", async () => {
+      engine.createProject("My Song");
+
+      await engine.disarm();
+
+      expect(capture.disarmCount).toBe(0);
+    });
+
+    it("notifies armed-state listeners as the device is armed and disarmed", async () => {
+      engine.createProject("My Song");
+      const observed: boolean[] = [];
+      engine.onArmedChange((armed) => observed.push(armed));
+
+      await engine.arm();
+      await engine.disarm();
+
+      expect(observed).toEqual([true, false]);
+    });
+
+    it("shows the arming wait as its own status, distinct from idle, while the device is being acquired", async () => {
+      vi.useFakeTimers();
+      try {
+        const timedEngine = new RecordingEngine(capture, playback, { countIn, ...NO_LEAD_IN });
+        timedEngine.createProject("My Song");
+        capture.armDelayMs = 500;
+
+        const armPromise = timedEngine.arm();
+        await vi.advanceTimersByTimeAsync(499);
+        expect(timedEngine.getStatus()).toBe("arming");
+        expect(timedEngine.isArmed()).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await armPromise;
+        expect(timedEngine.getStatus()).toBe("idle");
+        expect(timedEngine.isArmed()).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("releases an idle armed device after idleReleaseMs of inactivity", async () => {
+      vi.useFakeTimers();
+      try {
+        const timedEngine = new RecordingEngine(capture, playback, {
+          countIn,
+          countInBars: 0,
+          countInPaddingMs: 0,
+          idleReleaseMs: 1000,
+        });
+        timedEngine.createProject("My Song");
+
+        await timedEngine.recordTake(undefined);
+        await timedEngine.stopRecording();
+
+        await vi.advanceTimersByTimeAsync(999);
+        expect(capture.disarmCount).toBe(0);
+        expect(timedEngine.isArmed()).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(capture.disarmCount).toBe(1);
+        expect(timedEngine.isArmed()).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not release the device while a retake starts before the idle timeout", async () => {
+      vi.useFakeTimers();
+      try {
+        const timedEngine = new RecordingEngine(capture, playback, {
+          countIn,
+          countInBars: 0,
+          countInPaddingMs: 0,
+          idleReleaseMs: 1000,
+        });
+        timedEngine.createProject("My Song");
+
+        await timedEngine.recordTake(undefined);
+        await timedEngine.stopRecording();
+        await vi.advanceTimersByTimeAsync(500);
+
+        await timedEngine.recordTake(undefined);
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(capture.disarmCount).toBe(0);
+        expect(timedEngine.isArmed()).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("rejects arming while unarmed and busy with something else", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      await engine.stopRecording();
+      await engine.disarm();
+      await engine.play();
+
+      await expect(engine.arm()).rejects.toThrow();
+    });
+
+    it("rejects disarming while recording", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+
+      await expect(engine.disarm()).rejects.toThrow();
     });
   });
 

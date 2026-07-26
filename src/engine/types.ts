@@ -51,13 +51,18 @@ export interface MonitorMixLevel {
 }
 
 /**
- * `getting-ready` is the silent Count-in Padding, distinct from
- * `counting-in` (the audible, musical Count-in that follows it) — the two
- * phases are separate states because they mean different things to the
- * performer: one is dead time before the count, the other is the count.
+ * `arming` is the capture device being acquired and waited on for readiness
+ * (ADR 0005) — dead time before the lead-in, not part of it. `getting-ready`
+ * is the silent Count-in Padding, distinct from `counting-in` (the audible,
+ * musical Count-in that follows it) — the two phases are separate states
+ * because they mean different things to the performer: one is dead time
+ * before the count, the other is the count. Arming does not recur on a
+ * Track that is already armed, so an unarmed Track's first Take passes
+ * through it and a retake does not.
  */
 export type EngineStatus =
   | "idle"
+  | "arming"
   | "getting-ready"
   | "counting-in"
   | "recording"

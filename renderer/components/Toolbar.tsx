@@ -19,9 +19,11 @@ export function Toolbar({
   const isRecording = useTransportStore((s) => s.isRecording);
   const leadInPhase = useTransportStore((s) => s.leadInPhase);
   const isPlaying = useTransportStore((s) => s.isPlaying);
+  const isArmed = useTransportStore((s) => s.isArmed);
   const recordingTrackId = useTransportStore((s) => s.recordingTrackId);
   const recordToggle = useTransportStore((s) => s.recordToggle);
   const playToggle = useTransportStore((s) => s.playToggle);
+  const armToggle = useTransportStore((s) => s.armToggle);
 
   return (
     <>
@@ -29,6 +31,13 @@ export function Toolbar({
       <div className="panel">
         <button onClick={() => void saveProject()} disabled={isSaving}>
           {isSaving ? "Saving…" : "Save Project"}
+        </button>
+        <button
+          onClick={() => void armToggle()}
+          disabled={leadInPhase !== null || isRecording}
+          aria-pressed={isArmed}
+        >
+          {isArmed ? "Disarm" : "Arm Camera & Mic"}
         </button>
         <button
           onClick={() => void recordToggle(undefined)}

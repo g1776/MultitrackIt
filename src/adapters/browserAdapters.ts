@@ -15,7 +15,6 @@ import {
 } from "../diagnostics/audioProcessing";
 
 interface ActiveCapture extends CaptureHandle {
-  stream: MediaStream;
   recorder: MediaRecorder;
   chunks: Blob[];
   stopped: Promise<void>;
@@ -27,6 +26,12 @@ interface ActiveCapture extends CaptureHandle {
  * Electron's renderer process (getUserMedia + MediaRecorder). This is the
  * Electron/OS-backed implementation of the CaptureAdapter seam; the engine
  * never touches these APIs directly.
+ *
+ * Arming (`arm`/`disarm`) owns device acquisition and release; `startCapture`/
+ * `stopCapture` only start/stop a `MediaRecorder` on the stream already held
+ * open by arming (ADR 0005). Device negotiation is not instantaneous and
+ * varies by hundreds of milliseconds, so it must not happen inside
+ * `startCapture` — that cost would land on the Project timeline's zero point.
  */
 export class BrowserCaptureAdapter implements CaptureAdapter {
   private nextId = 1;
@@ -34,10 +39,29 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
   private latencyByHandleId = new Map<string, number | undefined>();
   private activeCaptureId: string | undefined;
   private audioProcessing: AudioProcessingState | undefined;
+  private armedStream: MediaStream | undefined;
 
-  async startCapture(): Promise<CaptureHandle> {
+  isArmed(): boolean {
+    return this.armedStream !== undefined;
+  }
+
+  async arm(): Promise<void> {
+    if (this.armedStream) return;
     const { stream, constraintsRequested } = await openUnprocessedStream();
     this.audioProcessing = readAudioProcessing(stream, constraintsRequested);
+    await waitForFirstFrame(stream);
+    this.armedStream = stream;
+  }
+
+  async disarm(): Promise<void> {
+    if (!this.armedStream) return;
+    this.armedStream.getTracks().forEach((track) => track.stop());
+    this.armedStream = undefined;
+  }
+
+  async startCapture(): Promise<CaptureHandle> {
+    if (!this.armedStream) throw new Error("Cannot start capture while unarmed");
+    const stream = this.armedStream;
     const recorder = new MediaRecorder(stream);
     const chunks: Blob[] = [];
     recorder.ondataavailable = (event) => {
@@ -52,7 +76,6 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
 
     const handle: ActiveCapture = {
       id: `capture-${this.nextId++}`,
-      stream,
       recorder,
       chunks,
       stopped,
@@ -70,7 +93,9 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
 
     active.recorder.stop();
     await active.stopped;
-    active.stream.getTracks().forEach((track) => track.stop());
+    // Recording stops here; the device stays held open (ADR 0005) — release
+    // is `disarm()`'s job, driven by the engine's idle-release timer, not
+    // this Take's own stop.
     this.active.delete(handle.id);
     if (this.activeCaptureId === handle.id) this.activeCaptureId = undefined;
     this.latencyByHandleId.set(handle.id, estimateMonitorOutputLatencyMs());
@@ -81,13 +106,17 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
 
   /**
    * The live `MediaStream` of the in-progress capture, if any — for a
-   * real-time self-view preview while recording. UI-only: not part of the
-   * `CaptureAdapter` seam, since the engine has no use for a live stream
-   * (it only deals in the finished `mediaRef` `stopCapture` returns).
+   * real-time self-view preview while recording. Gated on an active
+   * `MediaRecorder`, not merely on being armed: the stream is held open
+   * across idle time between Takes too (ADR 0005), and a self-view preview
+   * before a performer has actually started recording is a separate feature
+   * this issue doesn't ask for. UI-only: not part of the `CaptureAdapter`
+   * seam, since the engine has no use for a live stream (it only deals in
+   * the finished `mediaRef` `stopCapture` returns).
    */
   getActiveStream(): MediaStream | undefined {
     if (!this.activeCaptureId) return undefined;
-    return this.active.get(this.activeCaptureId)?.stream;
+    return this.armedStream;
   }
 
   /**
@@ -157,6 +186,52 @@ export function readAudioProcessing(
     ? (track.getSettings() as GrantedAudioSettings)
     : null;
   return describeAudioProcessing(settings, { constraintsRequested });
+}
+
+/**
+ * Resolves once `stream` is actually delivering a decoded video frame, not
+ * merely once `getUserMedia` has resolved a stream object — a camera can
+ * still be ramping exposure/gain at that point, and a `MediaRecorder`
+ * started too early can produce media whose opening is missing or dark
+ * (ADR 0005). Resolves immediately for an audio-only stream, since there is
+ * no video frame to wait for and Web Audio exposes no equivalent readiness
+ * signal for the input side. Not the common path today: `openUnprocessedStream`
+ * always requests audio+video together, since a Track is audio+video coupled
+ * (`CONTEXT.md`) — an audio-only Track remains a future variant, not
+ * supported yet — so this branch is a defensive fallback rather than a gap
+ * this issue leaves open for the devices it actually acquires.
+ */
+function waitForFirstFrame(stream: MediaStream): Promise<void> {
+  if (stream.getVideoTracks().length === 0) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+
+    const cleanup = () => {
+      video.srcObject = null;
+    };
+    const ready = () => {
+      cleanup();
+      resolve();
+    };
+
+    const requestVideoFrameCallback = (
+      video as Partial<{ requestVideoFrameCallback: (callback: () => void) => number }>
+    ).requestVideoFrameCallback;
+    if (requestVideoFrameCallback) {
+      requestVideoFrameCallback.call(video, ready);
+    } else {
+      video.onloadeddata = ready;
+    }
+    void video.play().catch(() => {
+      // A play() rejection here (e.g. autoplay policy) still leaves frames
+      // decoding once the stream is attached in most browsers; onloadeddata
+      // /requestVideoFrameCallback above is the actual readiness signal.
+    });
+  });
 }
 
 function estimateMonitorOutputLatencyMs(): number | undefined {

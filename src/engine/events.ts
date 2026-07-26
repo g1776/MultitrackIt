@@ -31,6 +31,10 @@ export type PlaybackPurpose = "monitor-mix" | "composite";
  * sink's job (see `EngineEventSink`).
  */
 export type EngineEvent =
+  | { type: "arming-started" }
+  | { type: "armed" }
+  | { type: "arming-failed"; message: string }
+  | { type: "disarmed" }
   | { type: "padding-started"; requestedDurationMs: number }
   | { type: "padding-ended" }
   | { type: "count-in-started"; requestedDurationMs: number; beats: number; bars: number }

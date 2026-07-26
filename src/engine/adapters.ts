@@ -5,11 +5,29 @@ import type { TakeId } from "./types";
  * Seam between the recording engine and real OS-level AV I/O. The engine
  * depends only on these interfaces, never on Electron/browser AV APIs
  * directly, so it can be exercised in tests with fakes.
+ *
+ * Arming (acquiring the device and holding it open) is a distinct lifecycle
+ * step from starting/stopping a Take's recording (ADR 0005): device
+ * negotiation is not instantaneous and must not happen inside the recording
+ * path, where its variance would land on the Project timeline's zero point.
+ * `startCapture`/`stopCapture` operate on an already-armed device and deal
+ * only in starting/stopping the recorder itself.
  */
 export interface CaptureAdapter {
-  /** Begin capturing audio+video. Returns a handle used to stop it. */
+  /**
+   * Acquires the capture device and resolves once it is actually delivering
+   * media — a resolved `getUserMedia` promise alone is not enough, since a
+   * camera can still be ramping exposure/gain at that point (ADR 0005).
+   * Resolves immediately if already armed.
+   */
+  arm(): Promise<void>;
+  /** Whether the device is currently held open by `arm()`. */
+  isArmed(): boolean;
+  /** Releases the held device. No-op if not armed. */
+  disarm(): Promise<void>;
+  /** Starts recording on an already-armed device. Returns a handle used to stop it. */
   startCapture(): Promise<CaptureHandle>;
-  /** Stop capturing and persist the result, returning an opaque media ref. */
+  /** Stops recording and persists the result, returning an opaque media ref. Does not release the device. */
   stopCapture(handle: CaptureHandle): Promise<string>;
   /**
    * Estimated round-trip monitoring/recording latency (ms) for the capture

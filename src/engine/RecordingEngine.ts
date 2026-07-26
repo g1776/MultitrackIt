@@ -40,6 +40,15 @@ export const DEFAULT_COUNT_IN_BARS = 1;
  */
 export const DEFAULT_COUNT_IN_PADDING_MS = 1000;
 
+/**
+ * How long (ms) an armed-but-idle capture device is held open before being
+ * released automatically (ADR 0005's "disarm on idle, not on stop"). Long
+ * enough that ordinary retake pacing never pays for reacquisition, short
+ * enough that a performer who has stepped away isn't left with a hot mic and
+ * camera indefinitely. 0 or below disables idle release entirely.
+ */
+export const DEFAULT_IDLE_RELEASE_MS = 30000;
+
 /** Count-in click source used when none is supplied — silent, for tests and headless use. */
 const SILENT_COUNT_IN: CountInAdapter = {
   playCountIn: async () => {},
@@ -53,6 +62,8 @@ export interface RecordingEngineOptions {
   countInBars?: number;
   /** Count-in Padding in ms. Defaults to `DEFAULT_COUNT_IN_PADDING_MS`. */
   countInPaddingMs?: number;
+  /** Idle-release delay in ms. Defaults to `DEFAULT_IDLE_RELEASE_MS`. */
+  idleReleaseMs?: number;
   /**
    * Optional observer of lifecycle events, for diagnostics. Absent during
    * normal operation, and nothing about the engine's behaviour depends on
@@ -85,9 +96,15 @@ export class RecordingEngine {
   private activePlaybackHandle: PlaybackHandle | null = null;
   private activeMonitorPlaybackHandle: PlaybackHandle | null = null;
   private statusListeners = new Set<(status: EngineStatus) => void>();
+  private armed = false;
+  private armedListeners = new Set<(armed: boolean) => void>();
+  /** The in-flight `arm()` attempt, if any — lets concurrent callers (e.g. a double-click) join it instead of racing a second acquisition. */
+  private armingPromise: Promise<void> | null = null;
+  private idleReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly countIn: CountInAdapter;
   private readonly countInBars: number;
   private readonly countInPaddingMs: number;
+  private readonly idleReleaseMs: number;
   private readonly events: EngineEventSink | undefined;
 
   constructor(
@@ -98,6 +115,7 @@ export class RecordingEngine {
     this.countIn = options.countIn ?? SILENT_COUNT_IN;
     this.countInBars = options.countInBars ?? DEFAULT_COUNT_IN_BARS;
     this.countInPaddingMs = options.countInPaddingMs ?? DEFAULT_COUNT_IN_PADDING_MS;
+    this.idleReleaseMs = options.idleReleaseMs ?? DEFAULT_IDLE_RELEASE_MS;
     this.events = options.events;
   }
 
@@ -219,6 +237,127 @@ export class RecordingEngine {
     for (const listener of this.statusListeners) listener(status);
   }
 
+  /** Whether the capture device is currently armed (held open) — see `arm()`. */
+  isArmed(): boolean {
+    return this.armed;
+  }
+
+  /**
+   * Subscribes to armed-state changes, returning an unsubscribe function.
+   * Kept separate from `onStatusChange`: armed is a persistent state of the
+   * device that outlives any one Take, not a phase of a single `recordTake`
+   * call the way `arming`/`getting-ready`/`counting-in` are.
+   */
+  onArmedChange(listener: (armed: boolean) => void): () => void {
+    this.armedListeners.add(listener);
+    return () => this.armedListeners.delete(listener);
+  }
+
+  private setArmed(armed: boolean): void {
+    this.armed = armed;
+    for (const listener of this.armedListeners) listener(armed);
+  }
+
+  /**
+   * Acquires and holds the capture device open, explicitly and ahead of any
+   * particular Take (ADR 0005: "holding is an action, not a preference").
+   * A no-op if already armed. `recordTake` calls this itself when needed, so
+   * a performer who never arms explicitly still gets a correct — if less
+   * predictable — lead-in; arming ahead of time is what makes retakes and
+   * the wait itself visible rather than incidental.
+   */
+  async arm(): Promise<void> {
+    if (this.armed) {
+      this.scheduleIdleRelease();
+      return;
+    }
+    if (this.armingPromise) {
+      await this.armingPromise;
+      this.scheduleIdleRelease();
+      return;
+    }
+    if (this.status !== "idle") {
+      throw new Error(`Cannot arm while ${this.status}`);
+    }
+    try {
+      await this.doArm();
+    } finally {
+      this.setStatus("idle");
+    }
+    this.scheduleIdleRelease();
+  }
+
+  /**
+   * The raw arm attempt, shared by `arm()` and `recordTake`. Leaves status
+   * management to the caller: `arm()` returns it to `idle` once done,
+   * `recordTake` instead carries straight on into the lead-in so the
+   * observed status sequence is `arming` → `getting-ready`, with no
+   * intervening `idle` flicker between an unarmed Take's arm and its lead-in.
+   */
+  private async doArm(): Promise<void> {
+    this.setStatus("arming");
+    this.events?.record({ type: "arming-started" });
+    const promise = this.capture
+      .arm()
+      .then(() => {
+        this.setArmed(true);
+        this.events?.record({ type: "armed" });
+      })
+      .catch((e) => {
+        this.events?.record({ type: "arming-failed", message: (e as Error).message });
+        throw e;
+      });
+    this.armingPromise = promise;
+    try {
+      await promise;
+    } finally {
+      this.armingPromise = null;
+    }
+  }
+
+  /**
+   * Releases the capture device. A no-op if not armed. Also called
+   * automatically after `idleReleaseMs` of no recording activity — see
+   * `scheduleIdleRelease`.
+   */
+  async disarm(): Promise<void> {
+    this.clearIdleReleaseTimer();
+    if (!this.armed) return;
+    if (this.status !== "idle") {
+      throw new Error(`Cannot disarm while ${this.status}`);
+    }
+    await this.capture.disarm();
+    this.setArmed(false);
+    this.events?.record({ type: "disarmed" });
+  }
+
+  /**
+   * (Re)starts the idle-release countdown. Called whenever the device
+   * becomes armed-and-idle — after `arm()` completes standalone, after a
+   * Take, or after an abandoned recording — and cancelled by
+   * `clearIdleReleaseTimer` the moment the device is put back to use, so a
+   * Take in progress can never be disarmed out from under it.
+   */
+  private scheduleIdleRelease(): void {
+    this.clearIdleReleaseTimer();
+    if (this.idleReleaseMs <= 0) return;
+    this.idleReleaseTimer = setTimeout(() => {
+      this.idleReleaseTimer = null;
+      void this.disarm().catch(() => {
+        // Best-effort: if the device is busy again by the time this fires
+        // (e.g. a recording started right as the timer expired), disarm()'s
+        // own guard rejects and there is nothing useful to do about it here.
+      });
+    }, this.idleReleaseMs);
+  }
+
+  private clearIdleReleaseTimer(): void {
+    if (this.idleReleaseTimer !== null) {
+      clearTimeout(this.idleReleaseTimer);
+      this.idleReleaseTimer = null;
+    }
+  }
+
   /**
    * The lead-in the next recording will use, derived from the active
    * Project's tempo and time signature — for a caller rendering the visible
@@ -255,6 +394,25 @@ export class RecordingEngine {
       : this.createTrack(project);
 
     this.activeCaptureTrackId = track.id;
+
+    // Arming completes before the lead-in begins (ADR 0005): device
+    // acquisition varies by hundreds of milliseconds and must not land
+    // inside the fixed padding/Count-in, so it happens here, ahead of
+    // building the Monitor Mix schedule the padding is timed against. A
+    // Track that is already armed skips straight through — retakes must not
+    // pay this wait or lose the performer's gain staging.
+    if (this.armed) {
+      this.clearIdleReleaseTimer();
+    } else {
+      try {
+        await this.doArm();
+      } catch (e) {
+        this.activeCaptureTrackId = null;
+        this.setStatus("idle");
+        throw e;
+      }
+    }
+
     const plan = this.getCountInPlan();
 
     // Monitor Mix: play back previously recorded Tracks' selected Takes,
@@ -315,6 +473,10 @@ export class RecordingEngine {
     await this.stopMonitorPlayback();
     this.activeCaptureTrackId = null;
     this.setStatus("idle");
+    // Reached only after arming already succeeded (the MediaRecorder-start
+    // step failed on an already-armed device), so the device is still
+    // armed and idle-release applies exactly as it would after a Take.
+    this.scheduleIdleRelease();
   }
 
   /** Stops Monitor Mix playback if any is in progress, leaving no active handle behind. */
@@ -367,6 +529,10 @@ export class RecordingEngine {
     this.activeCaptureHandle = null;
     this.activeCaptureTrackId = null;
     this.setStatus("idle");
+    // Disarm on idle, not on stop (ADR 0005): the device stays held open so
+    // a retake reuses this same acquisition, and is only released after
+    // idleReleaseMs of nothing happening.
+    this.scheduleIdleRelease();
   }
 
   renameTrack(trackId: TrackId, name: string): void {

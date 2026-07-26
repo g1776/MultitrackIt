@@ -5,8 +5,12 @@ import { createFakeEventSink } from "../diagnostics/fakeEventSink";
 import type { EngineEventLog } from "../diagnostics/eventLog";
 import type { TimestampedEngineEvent } from "./events";
 
-/** Options giving a recording no padding and no counted bars, so it starts capturing immediately. */
-const NO_LEAD_IN = { countInBars: 0, countInPaddingMs: 0 } as const;
+/**
+ * Options giving a recording no padding and no counted bars, so it starts
+ * capturing immediately, and disabling idle-release so tests don't leave a
+ * dangling real timer behind.
+ */
+const NO_LEAD_IN = { countInBars: 0, countInPaddingMs: 0, idleReleaseMs: 0 } as const;
 
 function types(events: TimestampedEngineEvent[]): string[] {
   return events.map((e) => e.type);
@@ -29,12 +33,14 @@ describe("RecordingEngine event sink", () => {
     return new RecordingEngine(capture, playback, { countIn, events, ...options });
   }
 
-  it("emits the lead-in in order: padding, then Count-in, then capture", async () => {
+  it("emits the lead-in in order: arming, then padding, then Count-in, then capture", async () => {
     const engine = newEngine({ countInBars: 1, countInPaddingMs: 0 });
     engine.createProject("My Song", { bpm: 6000, beatsPerBar: 4 });
     await engine.recordTake(undefined);
 
     expect(types(events.getEvents())).toEqual([
+      "arming-started",
+      "armed",
       "schedule-built",
       "padding-started",
       "padding-ended",
@@ -42,6 +48,28 @@ describe("RecordingEngine event sink", () => {
       "count-in-ended",
       "capture-started",
     ]);
+  });
+
+  it("emits no arming events for a retake, since the device is already armed", async () => {
+    const engine = newEngine({ countInBars: 1, countInPaddingMs: 0 });
+    engine.createProject("My Song", { bpm: 6000, beatsPerBar: 4 });
+    await engine.recordTake(undefined);
+    await engine.stopRecording();
+
+    events.clear();
+    await engine.recordTake(undefined);
+
+    expect(types(events.getEvents())).not.toContain("arming-started");
+  });
+
+  it("emits arming-failed and nothing about the lead-in when the device can't be acquired", async () => {
+    const engine = newEngine();
+    engine.createProject("My Song");
+    capture.armError = new Error("Permission denied");
+
+    await expect(engine.recordTake(undefined)).rejects.toThrow();
+
+    expect(types(events.getEvents())).toEqual(["arming-started", "arming-failed"]);
   });
 
   it("states the Count-in the tempo and bar count imply, so it isn't inferred from a residual", async () => {
