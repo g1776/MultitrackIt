@@ -1,11 +1,13 @@
 import type {
   CaptureAdapter,
   CaptureHandle,
+  CountInAdapter,
   PlaybackAdapter,
   PlaybackHandle,
   PlaybackMixUpdate,
   PlaybackSchedule,
 } from "./adapters";
+import type { MetronomeClick } from "./metronome";
 
 /** In-memory capture adapter for tests: no real AV I/O. */
 export class FakeCaptureAdapter implements CaptureAdapter {
@@ -29,6 +31,20 @@ export class FakeCaptureAdapter implements CaptureAdapter {
 
   getLatencyMs(): number | undefined {
     return this.reportedLatencyMs;
+  }
+}
+
+/** In-memory Count-in click source for tests: records the clicks it was asked to sound. */
+export class FakeCountInAdapter implements CountInAdapter {
+  public playedCountIns: MetronomeClick[][] = [];
+  public cancelCount = 0;
+
+  async playCountIn(clicks: MetronomeClick[]): Promise<void> {
+    this.playedCountIns.push(clicks);
+  }
+
+  cancel(): void {
+    this.cancelCount += 1;
   }
 }
 

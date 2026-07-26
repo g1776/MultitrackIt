@@ -1,6 +1,13 @@
-import type { CaptureAdapter, CaptureHandle, PlaybackAdapter, PlaybackHandle } from "./adapters";
+import type {
+  CaptureAdapter,
+  CaptureHandle,
+  CountInAdapter,
+  PlaybackAdapter,
+  PlaybackHandle,
+} from "./adapters";
 import type { EngineStatus, Guide, Project, Take, TakeId, Track, TrackId } from "./types";
 import { buildCompositeSchedule, buildMixUpdates, buildMonitorMixSchedule } from "./scheduling";
+import { computeCountIn, type CountInPlan } from "./countIn";
 import type { ProjectSnapshot } from "../persistence/types";
 
 let idCounter = 0;
@@ -10,11 +17,37 @@ function nextId(prefix: string): string {
 }
 
 /**
- * Fixed Count-in duration (ms) shown before recording actually captures
- * audio (see `CONTEXT.md`'s Count-in entry and ADR 0002) — a DAW-style
- * lead-in, not adaptively measured per-device.
+ * Bars counted in before capture begins, by default — one, which is what a
+ * performer expects unless told otherwise. Bars, not milliseconds: the
+ * Count-in's duration follows from the Project's tempo and time signature
+ * (see `computeCountIn`, ADR 0003).
  */
-export const DEFAULT_COUNT_IN_MS = 3000;
+export const DEFAULT_COUNT_IN_BARS = 1;
+
+/**
+ * Fixed silent interval (ms) before the Count-in, giving the shared playback
+ * clock time to prime so the first counted beat is accurate. Applied at every
+ * tempo, so the gap between starting a recording and that first beat is
+ * constant and learnable. Provisional: ADR 0003 adopted 1000ms as a guess to
+ * be corrected from the measurements ADR 0004's harness records, not as a
+ * figure derived from anything.
+ */
+export const DEFAULT_COUNT_IN_PADDING_MS = 1000;
+
+/** Count-in click source used when none is supplied — silent, for tests and headless use. */
+const SILENT_COUNT_IN: CountInAdapter = {
+  playCountIn: async () => {},
+  cancel: () => {},
+};
+
+export interface RecordingEngineOptions {
+  /** Dedicated Count-in click source. Defaults to a silent one. */
+  countIn?: CountInAdapter;
+  /** Whole bars to count in for. Defaults to `DEFAULT_COUNT_IN_BARS`. */
+  countInBars?: number;
+  /** Count-in Padding in ms. Defaults to `DEFAULT_COUNT_IN_PADDING_MS`. */
+  countInPaddingMs?: number;
+}
 
 /** Tempo a new Project starts at, and the fallback for snapshots saved before Projects owned a tempo. */
 export const DEFAULT_TEMPO_BPM = 100;
@@ -39,19 +72,20 @@ export class RecordingEngine {
   private activeCaptureTrackId: TrackId | null = null;
   private activePlaybackHandle: PlaybackHandle | null = null;
   private activeMonitorPlaybackHandle: PlaybackHandle | null = null;
-  /**
-   * Whether the recording in progress actually had a Monitor Mix playing
-   * (false when recording the very first Take, with nothing to sync
-   * against). Read by `stopRecording` to decide whether the Count-in gap
-   * needs to be folded into the new Take's Offset — see `recordTake`.
-   */
-  private activeRecordingHadMonitorMix = false;
+  private statusListeners = new Set<(status: EngineStatus) => void>();
+  private readonly countIn: CountInAdapter;
+  private readonly countInBars: number;
+  private readonly countInPaddingMs: number;
 
   constructor(
     private readonly capture: CaptureAdapter,
     private readonly playback: PlaybackAdapter,
-    private readonly countInMs: number = DEFAULT_COUNT_IN_MS
-  ) {}
+    options: RecordingEngineOptions = {}
+  ) {
+    this.countIn = options.countIn ?? SILENT_COUNT_IN;
+    this.countInBars = options.countInBars ?? DEFAULT_COUNT_IN_BARS;
+    this.countInPaddingMs = options.countInPaddingMs ?? DEFAULT_COUNT_IN_PADDING_MS;
+  }
 
   /**
    * Creates a Project at a fixed tempo and time signature (defaulting to
@@ -119,6 +153,38 @@ export class RecordingEngine {
     return this.status;
   }
 
+  /**
+   * Subscribes to status changes, returning an unsubscribe function. The
+   * lead-in passes through `getting-ready` and `counting-in` inside a single
+   * awaited `recordTake` call, so a UI that only sees that call resolve
+   * cannot tell the two phases apart — this is how it observes them.
+   */
+  onStatusChange(listener: (status: EngineStatus) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  private setStatus(status: EngineStatus): void {
+    this.status = status;
+    for (const listener of this.statusListeners) listener(status);
+  }
+
+  /**
+   * The lead-in the next recording will use, derived from the active
+   * Project's tempo and time signature — for a caller rendering the visible
+   * Count-in, so the beats it displays are the same ones the engine sounds
+   * and times capture against rather than a parallel calculation.
+   */
+  getCountInPlan(): CountInPlan {
+    const project = this.requireProject();
+    return computeCountIn({
+      bpm: project.tempoBpm,
+      beatsPerBar: project.beatsPerBar,
+      bars: this.countInBars,
+      paddingMs: this.countInPaddingMs,
+    });
+  }
+
   /** The handle for in-progress composite playback, if any — for a caller syncing its own UI (e.g. the video grid) to the same audio graph. */
   getActivePlaybackHandle(): PlaybackHandle | null {
     return this.activePlaybackHandle;
@@ -139,34 +205,60 @@ export class RecordingEngine {
       : this.createTrack(project);
 
     this.activeCaptureTrackId = track.id;
+    const plan = this.getCountInPlan();
 
     // Monitor Mix: play back previously recorded Tracks' selected Takes,
     // offset-corrected and in sync, so the performer can record against
-    // them. The Track being recorded onto is excluded. Started *before*
-    // capture, priming the shared playback clock during the visible
-    // Count-in, so the new Take's capture start (once the Count-in
-    // elapses) aligns with the same clock the Monitor Mix is already
-    // scheduled against — inverted from starting capture first and having
-    // the Monitor Mix trail it (see Count-in, `CONTEXT.md`, ADR 0002).
+    // them. The Track being recorded onto is excluded. The whole mix is
+    // scheduled to *begin at capture start* (`leadInMs`), because that is
+    // the Project timeline's zero point — so a Guide of a given length
+    // offers that entire length to record against, none of it spent on the
+    // lead-in. Handed to the playback adapter now rather than when the
+    // lead-in ends, so the shared clock primes silently during the padding
+    // and the Count-in's first beat lands accurately (see Project timeline
+    // and Count-in Padding, `CONTEXT.md`, ADR 0003).
     const monitorSchedule = buildMonitorMixSchedule(
       project.tracks,
       project.guide,
       this.monitorMix,
-      track.id
+      track.id,
+      plan.leadInMs
     );
-    this.activeRecordingHadMonitorMix = monitorSchedule.entries.length > 0;
-    if (this.activeRecordingHadMonitorMix) {
+    if (monitorSchedule.entries.length > 0) {
       this.activeMonitorPlaybackHandle = await this.playback.play(monitorSchedule);
     }
 
-    this.status = "counting-in";
-    await this.wait(this.countInMs);
+    // Get ready (silent), then count in (audible), then capture. The clicks
+    // come from their own source, never from the Guide, which has not begun
+    // sounding yet at this point.
+    this.setStatus("getting-ready");
+    await this.wait(plan.paddingMs);
 
-    this.activeCaptureHandle = await this.capture.startCapture();
-    this.status = "recording";
+    this.setStatus("counting-in");
+    if (plan.clicks.length > 0) await this.countIn.playCountIn(plan.clicks);
+    await this.wait(plan.countInMs);
+
+    try {
+      this.activeCaptureHandle = await this.capture.startCapture();
+    } catch (e) {
+      await this.abandonRecording();
+      throw e;
+    }
+    this.setStatus("recording");
   }
 
-  /** Resolves after `ms`, or immediately for `ms <= 0` — lets tests skip the real Count-in delay. */
+  /** Tears down a recording that never reached `recording`, leaving the engine idle. */
+  private async abandonRecording(): Promise<void> {
+    this.countIn.cancel();
+    if (this.activeMonitorPlaybackHandle) {
+      await this.playback.stop(this.activeMonitorPlaybackHandle);
+      this.activeMonitorPlaybackHandle = null;
+    }
+    this.activeCaptureTrackId = null;
+    this.setStatus("idle");
+  }
+
+  /** Resolves after `ms`, or immediately for `ms <= 0` — lets tests skip the real lead-in delay. */
   private wait(ms: number): Promise<void> {
     if (ms <= 0) return Promise.resolve();
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -186,21 +278,18 @@ export class RecordingEngine {
 
     const track = this.requireTrack(trackId);
     const latencyMs = this.capture.getLatencyMs?.();
-    // Capture only actually started once the Count-in elapsed (see
-    // recordTake), so this Take's own t=0 is `countInMs` later than the
-    // Monitor Mix's t=0 it was performed against — that gap must be folded
-    // into its Offset, or it plays back countInMs too early relative to
-    // the material it was recorded in sync with. Only applies when there
-    // was a Monitor Mix to sync against; the very first Take has nothing
-    // to be offset from. Latency correction (negated: a Take recorded
-    // against Monitor Mix output that arrived `latencyMs` late needs to
-    // start that much earlier to line back up) layers on top of that.
-    const countInCorrectionMs = this.activeRecordingHadMonitorMix ? this.countInMs : 0;
+    // Latency correction, and nothing else: this Take's own t=0 is capture
+    // start, which is also the Project timeline's zero point, so nothing
+    // about the lead-in enters here (see Offset, `CONTEXT.md`, ADR 0003).
+    // Negated: a Take recorded against Monitor Mix output that arrived
+    // `latencyMs` late needs to start that much earlier to line back up.
+    // Written as a conditional rather than `-(latencyMs ?? 0)` so an absent
+    // estimate stores 0, not -0.
     const take: Take = {
       id: nextId("take"),
       trackId,
       mediaRef,
-      offsetMs: countInCorrectionMs - (latencyMs ?? 0),
+      offsetMs: latencyMs ? -latencyMs : 0,
       createdAt: Date.now(),
     };
     track.takes.push(take);
@@ -208,8 +297,7 @@ export class RecordingEngine {
 
     this.activeCaptureHandle = null;
     this.activeCaptureTrackId = null;
-    this.activeRecordingHadMonitorMix = false;
-    this.status = "idle";
+    this.setStatus("idle");
   }
 
   renameTrack(trackId: TrackId, name: string): void {
@@ -274,7 +362,7 @@ export class RecordingEngine {
     const schedule = buildCompositeSchedule(project.tracks, project.guide, this.monitorMix);
 
     this.activePlaybackHandle = await this.playback.play(schedule);
-    this.status = "playing";
+    this.setStatus("playing");
   }
 
   async stop(): Promise<void> {
@@ -282,7 +370,7 @@ export class RecordingEngine {
       await this.playback.stop(this.activePlaybackHandle);
       this.activePlaybackHandle = null;
     }
-    this.status = "idle";
+    this.setStatus("idle");
   }
 
   /** Serializes the active Project's full state (Tracks, Takes, Guide, Monitor Mix) for persistence. */

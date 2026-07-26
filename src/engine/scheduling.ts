@@ -100,12 +100,28 @@ function isTrackAudible(tracks: Track[], track: Track): boolean {
  * onto (`recordingTrackId`) is excluded so the performer only hears prior
  * parts. The Guide is included here even though it's excluded from
  * composite playback, since Monitor Mix is recording-only.
+ *
+ * `leadInMs` places the Project timeline's zero point — where the Guide's
+ * first beat and every prior Take with Offset 0 sit — at capture start
+ * rather than at lead-in start (see Project timeline, `CONTEXT.md`, ADR
+ * 0003). Playing that schedule from the beginning of the lead-in is
+ * deliberate: it gives the shared playback clock the padding interval to
+ * prime while nothing is yet audible.
+ *
+ * It is added to each Offset *before* normalization, not to the finished
+ * schedule, and that ordering is the whole point: a Take latency-corrected
+ * to a negative Offset simply starts slightly inside the lead-in, where
+ * there is now room for it, instead of dragging the entire mix later and
+ * pushing t=0 past capture start. Normalization still catches an Offset
+ * negative enough to precede the lead-in itself (only reachable by a
+ * user-entered one), for which no earlier start exists to give.
  */
 export function buildMonitorMixSchedule(
   tracks: Track[],
   guide: Guide | null,
   monitorMixLevels: Map<TrackId | "guide", number>,
-  recordingTrackId: TrackId | undefined
+  recordingTrackId: TrackId | undefined,
+  leadInMs = 0
 ): PlaybackSchedule {
   const otherTracks = recordingTrackId
     ? tracks.filter((t) => t.id !== recordingTrackId)
@@ -120,7 +136,9 @@ export function buildMonitorMixSchedule(
       muted: false,
     });
   }
-  return computePlaybackSchedule(inputs);
+  return computePlaybackSchedule(
+    inputs.map((input) => ({ ...input, offsetMs: input.offsetMs + leadInMs }))
+  );
 }
 
 /**

@@ -1,5 +1,6 @@
 import { RecordingEngine } from "../../src/engine/RecordingEngine";
 import { BrowserCaptureAdapter, BrowserPlaybackAdapter } from "../../src/adapters/browserAdapters";
+import { BrowserCountInAdapter } from "../../src/adapters/countInAudio";
 import { ElectronProjectStorageAdapter } from "../../src/adapters/electronStorageAdapter";
 import type { ProjectStorageAdapter } from "../../src/persistence/types";
 
@@ -9,5 +10,8 @@ import type { ProjectStorageAdapter } from "../../src/persistence/types";
 // exists before any component mounts.
 export const captureAdapter = new BrowserCaptureAdapter();
 export const playbackAdapter = new BrowserPlaybackAdapter();
-export const engine = new RecordingEngine(captureAdapter, playbackAdapter);
+export const countInAdapter = new BrowserCountInAdapter(() => playbackAdapter.getAudioContext());
+export const engine = new RecordingEngine(captureAdapter, playbackAdapter, {
+  countIn: countInAdapter,
+});
 export const storage: ProjectStorageAdapter = new ElectronProjectStorageAdapter();

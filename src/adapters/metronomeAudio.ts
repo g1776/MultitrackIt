@@ -1,7 +1,7 @@
 import { computeMetronomeClicks, type MetronomeParams } from "../engine/metronome";
+import { CLICK_DURATION_S, clickFrequencyHz, clickPeakAmplitude } from "./clickTimbre";
 
 const SAMPLE_RATE = 44100;
-const CLICK_DURATION_S = 0.03;
 
 /**
  * Renders a metronome click at `atMs` into `channel`: a short sine burst
@@ -11,8 +11,8 @@ const CLICK_DURATION_S = 0.03;
 function renderClick(channel: Float32Array, atMs: number, accent: boolean): void {
   const startSample = Math.round((atMs / 1000) * SAMPLE_RATE);
   const durationSamples = Math.round(CLICK_DURATION_S * SAMPLE_RATE);
-  const frequency = accent ? 1500 : 1000;
-  const peakAmplitude = accent ? 0.9 : 0.6;
+  const frequency = clickFrequencyHz(accent);
+  const peakAmplitude = clickPeakAmplitude(accent);
 
   for (let i = 0; i < durationSamples; i++) {
     const sampleIndex = startSample + i;

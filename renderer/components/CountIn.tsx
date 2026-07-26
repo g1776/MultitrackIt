@@ -1,31 +1,42 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_COUNT_IN_MS } from "../../src/engine/RecordingEngine";
+import { useTransportStore } from "../store/useTransportStore";
 
 /**
- * Visible Count-in shown between triggering a recording and capture
- * actually starting (see Count-in, `CONTEXT.md`, ADR 0002) — a fixed,
- * predictable countdown so the performer knows recording hasn't silently
- * started. Purely presentational: the engine's own Count-in delay
- * (`DEFAULT_COUNT_IN_MS`) is the actual gate on when capture starts; this
- * just ticks a local countdown down over the same duration for display.
+ * The lead-in made visible: a silent "get ready" state while the Count-in
+ * Padding primes the playback clock, then the counted beats themselves,
+ * ticking up as they sound. The beat times come from the engine's own
+ * Count-in plan (via the transport store) rather than a duration recomputed
+ * here, so the beats shown are the ones the engine sounds and times capture
+ * against — displayed on a UI timer, so this is a readout of that plan, not
+ * a second clock anything is scheduled from.
  */
 export function CountIn() {
-  const [remainingMs, setRemainingMs] = useState(DEFAULT_COUNT_IN_MS);
+  const leadInPhase = useTransportStore((s) => s.leadInPhase);
+  const clicks = useTransportStore((s) => s.countInClicks);
+  const [beatsElapsed, setBeatsElapsed] = useState(0);
+
+  const isCountingIn = leadInPhase === "counting-in";
 
   useEffect(() => {
-    setRemainingMs(DEFAULT_COUNT_IN_MS);
-    const start = Date.now();
-    const interval = setInterval(() => {
-      setRemainingMs(Math.max(0, DEFAULT_COUNT_IN_MS - (Date.now() - start)));
-    }, 100);
+    if (!isCountingIn) {
+      setBeatsElapsed(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const tick = () => {
+      const elapsedMs = Date.now() - startedAt;
+      setBeatsElapsed(clicks.filter((click) => click.atMs <= elapsedMs).length);
+    };
+    tick();
+    const interval = setInterval(tick, 50);
     return () => clearInterval(interval);
-  }, []);
+  }, [isCountingIn, clicks]);
 
-  const remainingSeconds = Math.ceil(remainingMs / 1000);
+  if (!leadInPhase) return null;
 
   return (
     <p role="status" className="status">
-      Recording starts in {remainingSeconds}…
+      {isCountingIn ? `Count-in: ${beatsElapsed} / ${clicks.length}` : "Get ready…"}
     </p>
   );
 }

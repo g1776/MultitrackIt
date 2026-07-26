@@ -1,5 +1,6 @@
+/** One click of a click track — a generated metronome Guide, or a Count-in. */
 export interface MetronomeClick {
-  /** Milliseconds from the start of the guide. */
+  /** Milliseconds from the start of the click track. */
   atMs: number;
   /** True for the first beat of each bar (typically accented/louder). */
   accent: boolean;
@@ -24,11 +25,14 @@ export function computeMetronomeClicks(params: MetronomeParams): MetronomeClick[
   if (beatsPerBar <= 0) throw new Error("beatsPerBar must be positive");
   if (durationMs <= 0) return [];
 
+  // Beat times are computed as `index * beatInterval` rather than
+  // accumulated: over a Guide minutes long, a tempo whose beat interval
+  // isn't exact in binary would otherwise drift audibly against the Takes
+  // recorded to it. Same reasoning as `computeCountIn`.
   const beatIntervalMs = 60000 / bpm;
-  const clicks: MetronomeClick[] = [];
-  let beatIndex = 0;
-  for (let atMs = 0; atMs < durationMs; atMs += beatIntervalMs, beatIndex++) {
-    clicks.push({ atMs, accent: beatIndex % beatsPerBar === 0 });
-  }
-  return clicks;
+  const beatCount = Math.ceil(durationMs / beatIntervalMs);
+  return Array.from({ length: beatCount }, (_, beatIndex) => ({
+    atMs: beatIndex * beatIntervalMs,
+    accent: beatIndex % beatsPerBar === 0,
+  }));
 }

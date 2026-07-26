@@ -196,6 +196,49 @@ describe("buildMonitorMixSchedule", () => {
     const schedule = buildMonitorMixSchedule([], guide, new Map(), undefined);
     expect(schedule.entries).toEqual([]);
   });
+
+  it("delays the Guide by the lead-in so it begins at capture start rather than at lead-in start", () => {
+    const guide: Guide = { mediaRef: "guide-media", includeInMonitorMix: true, includeInMixdown: false };
+    const schedule = buildMonitorMixSchedule([], guide, new Map(), undefined, 3000);
+    expect(schedule.entries[0].startAtMs).toBe(3000);
+  });
+
+  it("places timeline t=0 at capture start, letting a latency-corrected negative Offset start inside the lead-in", () => {
+    const guide: Guide = { mediaRef: "guide-media", includeInMonitorMix: true, includeInMixdown: false };
+    const trackA = makeTrack({
+      id: "a",
+      takes: [take("take-a", "a", -100)],
+      selectedTakeId: "take-a",
+    });
+    const trackB = makeTrack({
+      id: "b",
+      takes: [take("take-b", "b", 50)],
+      selectedTakeId: "take-b",
+    });
+
+    const schedule = buildMonitorMixSchedule([trackA, trackB], guide, new Map(), undefined, 3000);
+
+    // The Guide (Offset 0) sits exactly at capture start; the negative Offset
+    // starts 100ms earlier, inside the lead-in, dragging nothing with it.
+    expect(schedule.entries.map((e) => e.startAtMs)).toEqual([2900, 3050, 3000]);
+  });
+
+  it("normalizes an Offset negative enough to precede the lead-in itself, preserving relative timing", () => {
+    const trackA = makeTrack({
+      id: "a",
+      takes: [take("take-a", "a", -5000)],
+      selectedTakeId: "take-a",
+    });
+    const trackB = makeTrack({
+      id: "b",
+      takes: [take("take-b", "b", 0)],
+      selectedTakeId: "take-b",
+    });
+
+    const schedule = buildMonitorMixSchedule([trackA, trackB], null, new Map(), undefined, 3000);
+
+    expect(schedule.entries.map((e) => e.startAtMs)).toEqual([0, 5000]);
+  });
 });
 
 describe("buildCompositeSchedule", () => {

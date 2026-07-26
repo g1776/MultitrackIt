@@ -129,8 +129,13 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
   private active = new Map<string, ActivePlayback>();
   private audioContext: AudioContext | undefined;
 
-  /** The single AudioContext shared across every play() call for this adapter's lifetime. */
-  private getAudioContext(): AudioContext {
+  /**
+   * The single AudioContext shared across every play() call for this
+   * adapter's lifetime. Public because the Count-in click source schedules
+   * against it too: the Count-in's last beat and the Guide that follows it
+   * at t=0 must be timed on one clock, not two.
+   */
+  getAudioContext(): AudioContext {
     if (!this.audioContext) this.audioContext = new AudioContext();
     return this.audioContext;
   }

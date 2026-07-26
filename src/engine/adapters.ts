@@ -1,3 +1,4 @@
+import type { MetronomeClick } from "./metronome";
 import type { TakeId } from "./types";
 
 /**
@@ -22,6 +23,24 @@ export interface CaptureAdapter {
 
 export interface CaptureHandle {
   id: string;
+}
+
+/**
+ * Dedicated Count-in click source. Kept separate from the PlaybackAdapter
+ * because the Count-in is not part of the Project timeline: its clicks
+ * occupy negative time, are never recorded, and never come from the Guide
+ * (which begins at t=0, when the Count-in ends — see Count-in, `CONTEXT.md`,
+ * ADR 0003).
+ */
+export interface CountInAdapter {
+  /**
+   * Starts the given clicks playing now, resolving once they are scheduled
+   * rather than once they have all sounded — the engine, not the adapter,
+   * owns when the Count-in ends and capture begins.
+   */
+  playCountIn(clicks: MetronomeClick[]): Promise<void>;
+  /** Stops any clicks still pending, e.g. if a recording is abandoned mid-Count-in. */
+  cancel(): void;
 }
 
 export interface PlaybackSchedule {

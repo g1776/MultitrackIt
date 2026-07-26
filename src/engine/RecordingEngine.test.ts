@@ -1,18 +1,30 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { DEFAULT_BEATS_PER_BAR, DEFAULT_TEMPO_BPM, RecordingEngine } from "./RecordingEngine";
-import { FakeCaptureAdapter, FakePlaybackAdapter } from "./fakeAdapters";
+import {
+  DEFAULT_BEATS_PER_BAR,
+  DEFAULT_COUNT_IN_BARS,
+  DEFAULT_COUNT_IN_PADDING_MS,
+  DEFAULT_TEMPO_BPM,
+  RecordingEngine,
+} from "./RecordingEngine";
+import { computeCountIn } from "./countIn";
+import { FakeCaptureAdapter, FakeCountInAdapter, FakePlaybackAdapter } from "./fakeAdapters";
+
+/** Options giving a recording no padding and no counted bars, so it starts capturing immediately. */
+const NO_LEAD_IN = { countInBars: 0, countInPaddingMs: 0 } as const;
 
 describe("RecordingEngine", () => {
   let capture: FakeCaptureAdapter;
   let playback: FakePlaybackAdapter;
+  let countIn: FakeCountInAdapter;
   let engine: RecordingEngine;
 
   beforeEach(() => {
     capture = new FakeCaptureAdapter();
     playback = new FakePlaybackAdapter();
-    // countInMs: 0 skips the real Count-in delay so these tests run fast;
-    // Count-in sequencing itself is covered separately below.
-    engine = new RecordingEngine(capture, playback, 0);
+    countIn = new FakeCountInAdapter();
+    // A zero-length lead-in skips the real waits so these tests run fast;
+    // lead-in sequencing itself is covered separately below.
+    engine = new RecordingEngine(capture, playback, { countIn, ...NO_LEAD_IN });
   });
 
   describe("createProject", () => {
@@ -90,7 +102,7 @@ describe("RecordingEngine", () => {
         startCapture: () => capture.startCapture(),
         stopCapture: (handle) => capture.stopCapture(handle),
       };
-      const bareEngine = new RecordingEngine(noLatencyCapture, playback, 0);
+      const bareEngine = new RecordingEngine(noLatencyCapture, playback, NO_LEAD_IN);
       bareEngine.createProject("My Song");
       await bareEngine.recordTake(undefined);
 
@@ -298,42 +310,44 @@ describe("RecordingEngine", () => {
       expect(playback.playedSchedules).toHaveLength(0);
     });
 
-    it("folds the Count-in duration into the new Take's Offset when recorded against a Monitor Mix, so it doesn't play back early relative to what it was actually recorded against", async () => {
-      const countInEngine = new RecordingEngine(capture, playback, 500);
-      countInEngine.createProject("My Song");
-      await countInEngine.recordTake(undefined);
-      await countInEngine.stopRecording();
+    it("schedules previously recorded Tracks to begin at capture start, not at lead-in start", async () => {
+      const leadInEngine = new RecordingEngine(capture, playback, { countIn, countInPaddingMs: 20 });
+      leadInEngine.createProject("My Song", { bpm: 120, beatsPerBar: 1 });
+      await leadInEngine.recordTake(undefined);
+      await leadInEngine.stopRecording();
 
-      await countInEngine.recordTake(undefined);
-      await countInEngine.stopRecording();
+      await leadInEngine.recordTake(undefined);
 
-      const secondTake = countInEngine.getActiveProject()!.tracks[1].takes[0];
-      expect(secondTake.offsetMs).toBe(500);
+      // 20ms padding + one one-beat bar at 120bpm (500ms).
+      expect(playback.playedSchedules[0].entries[0].startAtMs).toBe(520);
     });
 
-    it("does not fold the Count-in duration into the very first Take's Offset (nothing to sync against)", async () => {
-      const countInEngine = new RecordingEngine(capture, playback, 500);
-      countInEngine.createProject("My Song");
+    it("gives a Take recorded against a Monitor Mix an Offset of zero when no latency is reported — no lead-in term", async () => {
+      const leadInEngine = new RecordingEngine(capture, playback, { countIn, countInPaddingMs: 10 });
+      leadInEngine.createProject("My Song", { bpm: 240, beatsPerBar: 1 });
+      await leadInEngine.recordTake(undefined);
+      await leadInEngine.stopRecording();
 
-      await countInEngine.recordTake(undefined);
-      await countInEngine.stopRecording();
+      await leadInEngine.recordTake(undefined);
+      await leadInEngine.stopRecording();
 
-      const firstTake = countInEngine.getActiveProject()!.tracks[0].takes[0];
-      expect(firstTake.offsetMs).toBe(0);
+      const secondTake = leadInEngine.getActiveProject()!.tracks[1].takes[0];
+      expect(secondTake.offsetMs).toBe(0);
     });
 
-    it("subtracts measured latency from the Count-in-corrected Offset", async () => {
-      const countInEngine = new RecordingEngine(capture, playback, 500);
-      countInEngine.createProject("My Song");
-      await countInEngine.recordTake(undefined);
-      await countInEngine.stopRecording();
+    it("gives the first Take of a Guide-less Project — recorded against nothing — the same Offset rule as any other Take: exactly the negated latency, with no lead-in term", async () => {
+      const leadInEngine = new RecordingEngine(capture, playback, { countIn, countInPaddingMs: 10 });
+      leadInEngine.createProject("My Song", { bpm: 240, beatsPerBar: 1 });
 
       capture.reportedLatencyMs = 80;
-      await countInEngine.recordTake(undefined);
-      await countInEngine.stopRecording();
+      await leadInEngine.recordTake(undefined);
+      await leadInEngine.stopRecording();
+      await leadInEngine.recordTake(undefined);
+      await leadInEngine.stopRecording();
 
-      const secondTake = countInEngine.getActiveProject()!.tracks[1].takes[0];
-      expect(secondTake.offsetMs).toBe(420);
+      const [firstTrack, secondTrack] = leadInEngine.getActiveProject()!.tracks;
+      expect(firstTrack.takes[0].offsetMs).toBe(-80);
+      expect(secondTrack.takes[0].offsetMs).toBe(-80);
     });
 
     it("excludes the Track currently being recorded onto from the Monitor Mix", async () => {
@@ -359,54 +373,118 @@ describe("RecordingEngine", () => {
     });
   });
 
-  describe("Count-in", () => {
-    it("starts Monitor Mix playback before capture, entering counting-in status before capture actually starts", async () => {
-      const freshCapture = new FakeCaptureAdapter();
-      const freshPlayback = new FakePlaybackAdapter();
-      const countInEngine = new RecordingEngine(freshCapture, freshPlayback, 20);
-      countInEngine.createProject("My Song");
-      await countInEngine.recordTake(undefined);
-      await countInEngine.stopRecording();
-
-      const recordPromise = countInEngine.recordTake(undefined);
-      // Yield a couple ticks so recordTake reaches the awaited Count-in delay.
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(countInEngine.getStatus()).toBe("counting-in");
-      expect(freshPlayback.playedSchedules).toHaveLength(1); // Monitor Mix already primed/playing
-      expect(freshCapture.startedHandles).toHaveLength(1); // still only the first Take's capture
-
-      await recordPromise;
-
-      expect(countInEngine.getStatus()).toBe("recording");
-      expect(freshCapture.startedHandles).toHaveLength(2);
-    });
-
-    it("resolves recordTake immediately (no counting-in observed) when countInMs is 0", async () => {
+  describe("Count-in and Count-in Padding", () => {
+    it("counts in one bar by default", () => {
       engine.createProject("My Song");
-      await engine.recordTake(undefined);
-      expect(engine.getStatus()).toBe("recording");
+      const defaultEngine = new RecordingEngine(capture, playback, { countIn });
+      defaultEngine.createProject("My Song", { bpm: 120, beatsPerBar: 4 });
+
+      const plan = defaultEngine.getCountInPlan();
+
+      expect(DEFAULT_COUNT_IN_BARS).toBe(1);
+      expect(plan.clicks).toHaveLength(4);
+      expect(plan.paddingMs).toBe(DEFAULT_COUNT_IN_PADDING_MS);
     });
 
-    it("does not start capture until after the Count-in elapses", async () => {
+    it("derives the Count-in from the Project's own tempo and time signature", () => {
+      const defaultEngine = new RecordingEngine(capture, playback, { countIn });
+      defaultEngine.createProject("My Song", { bpm: 90, beatsPerBar: 3 });
+
+      expect(defaultEngine.getCountInPlan()).toEqual(
+        computeCountIn({
+          bpm: 90,
+          beatsPerBar: 3,
+          bars: DEFAULT_COUNT_IN_BARS,
+          paddingMs: DEFAULT_COUNT_IN_PADDING_MS,
+        })
+      );
+    });
+
+    it("sounds the Count-in from its own click source, accenting the downbeat, never from the Guide", async () => {
+      const leadInEngine = new RecordingEngine(capture, playback, {
+        countIn,
+        countInPaddingMs: 10,
+      });
+      leadInEngine.createProject("My Song", { bpm: 240, beatsPerBar: 4 });
+      leadInEngine.importGuide("guide-media-ref");
+
+      await leadInEngine.recordTake(undefined);
+
+      expect(countIn.playedCountIns).toHaveLength(1);
+      expect(countIn.playedCountIns[0].map((c) => c.accent)).toEqual([true, false, false, false]);
+      // The Guide is scheduled, but only from capture start — it is not what
+      // is sounding during the Count-in.
+      expect(playback.playedSchedules[0].entries[0].startAtMs).toBe(1010);
+    });
+
+    it("passes through getting-ready, then counting-in, then recording", async () => {
+      const leadInEngine = new RecordingEngine(capture, playback, {
+        countIn,
+        countInPaddingMs: 20,
+      });
+      leadInEngine.createProject("My Song", { bpm: 240, beatsPerBar: 1 });
+      const observed: string[] = [];
+      leadInEngine.onStatusChange((status) => observed.push(status));
+
+      await leadInEngine.recordTake(undefined);
+
+      expect(observed).toEqual(["getting-ready", "counting-in", "recording"]);
+    });
+
+    it("stays silent during the padding, sounding no click until the Count-in begins", async () => {
       vi.useFakeTimers();
       try {
-        const timedEngine = new RecordingEngine(capture, playback, 3000);
-        timedEngine.createProject("My Song");
+        const timedEngine = new RecordingEngine(capture, playback, {
+          countIn,
+          countInPaddingMs: 1000,
+        });
+        timedEngine.createProject("My Song", { bpm: 120, beatsPerBar: 4 });
 
         const recordPromise = timedEngine.recordTake(undefined);
-        await vi.advanceTimersByTimeAsync(2999);
-        expect(capture.startedHandles).toHaveLength(0);
-        expect(timedEngine.getStatus()).toBe("counting-in");
+        await vi.advanceTimersByTimeAsync(999);
+        expect(timedEngine.getStatus()).toBe("getting-ready");
+        expect(countIn.playedCountIns).toHaveLength(0);
 
         await vi.advanceTimersByTimeAsync(1);
+        expect(timedEngine.getStatus()).toBe("counting-in");
+        expect(countIn.playedCountIns).toHaveLength(1);
+        expect(capture.startedHandles).toHaveLength(0);
+
+        await vi.advanceTimersByTimeAsync(2000);
         await recordPromise;
         expect(capture.startedHandles).toHaveLength(1);
         expect(timedEngine.getStatus()).toBe("recording");
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("applies the padding even at a tempo whose bar is far longer than it", async () => {
+      vi.useFakeTimers();
+      try {
+        const timedEngine = new RecordingEngine(capture, playback, {
+          countIn,
+          countInPaddingMs: 1000,
+        });
+        timedEngine.createProject("My Song", { bpm: 40, beatsPerBar: 4 });
+
+        const recordPromise = timedEngine.recordTake(undefined);
+        await vi.advanceTimersByTimeAsync(999);
+        expect(countIn.playedCountIns).toHaveLength(0);
+
+        await vi.advanceTimersByTimeAsync(1 + 6000);
+        await recordPromise;
+        expect(capture.startedHandles).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("starts capturing immediately when configured with no padding and no counted bars", async () => {
+      engine.createProject("My Song");
+      await engine.recordTake(undefined);
+      expect(engine.getStatus()).toBe("recording");
+      expect(countIn.playedCountIns).toHaveLength(0);
     });
   });
 
@@ -591,7 +669,7 @@ describe("RecordingEngine", () => {
     it("round-trips the Project's tempo and time signature", () => {
       engine.createProject("My Song", { bpm: 120, beatsPerBar: 3 });
 
-      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter());
+      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter(), NO_LEAD_IN);
       freshEngine.loadSnapshot(engine.exportSnapshot());
 
       expect(freshEngine.getActiveProject()!.tempoBpm).toBe(120);
@@ -602,7 +680,7 @@ describe("RecordingEngine", () => {
       engine.createProject("My Song");
       const { tempoBpm, beatsPerBar, ...legacy } = engine.exportSnapshot();
 
-      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter());
+      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter(), NO_LEAD_IN);
       freshEngine.loadSnapshot(legacy);
 
       expect(freshEngine.getActiveProject()!.tempoBpm).toBe(DEFAULT_TEMPO_BPM);
@@ -613,7 +691,7 @@ describe("RecordingEngine", () => {
       engine.createProject("My Song");
       const snapshot = { ...engine.exportSnapshot(), tempoBpm: 0, beatsPerBar: -1 };
 
-      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter());
+      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter(), NO_LEAD_IN);
       freshEngine.loadSnapshot(snapshot);
 
       expect(freshEngine.getActiveProject()!.tempoBpm).toBe(DEFAULT_TEMPO_BPM);
@@ -631,7 +709,7 @@ describe("RecordingEngine", () => {
 
       const snapshot = engine.exportSnapshot();
 
-      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter());
+      const freshEngine = new RecordingEngine(new FakeCaptureAdapter(), new FakePlaybackAdapter(), NO_LEAD_IN);
       freshEngine.loadSnapshot(snapshot);
 
       const project = freshEngine.getActiveProject()!;

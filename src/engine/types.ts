@@ -50,4 +50,15 @@ export interface MonitorMixLevel {
   level: number;
 }
 
-export type EngineStatus = "idle" | "counting-in" | "recording" | "playing";
+/**
+ * `getting-ready` is the silent Count-in Padding, distinct from
+ * `counting-in` (the audible, musical Count-in that follows it) — the two
+ * phases are separate states because they mean different things to the
+ * performer: one is dead time before the count, the other is the count.
+ */
+export type EngineStatus =
+  | "idle"
+  | "getting-ready"
+  | "counting-in"
+  | "recording"
+  | "playing";
