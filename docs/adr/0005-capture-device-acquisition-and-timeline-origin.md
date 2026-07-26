@@ -1,4 +1,4 @@
-# 0005. Capture device acquisition is not instantaneous
+# 0005. Arming: capture device acquisition is not instantaneous
 
 ## Status
 
@@ -71,17 +71,84 @@ third Takes of a session measured their Count-in Padding at exactly 1000.00ms
 against a requested 1000ms); and the Count-in itself is accurate, measuring
 2400.00ms against a requested 2400ms on every warm pass.
 
+### Timing is not the only cost of reacquisition
+
+Reacquiring a device also resets it. On a USB microphone the operating
+system's input level maps onto the microphone's own gain, so opening the
+device writes over whatever gain the performer had set. A performer using an
+external microphone therefore loses their gain staging once per Take, and
+spends the beginning of a recording restoring it — a report we have from a
+performer using an Apogee HypeMiC with other recording software, whose cause
+is the same acquisition step this ADR is about.
+
+This matters to the decision because it means acquisition frequency is not
+purely an internal timing concern. Every acquisition is a visible disruption
+to the performer's instrument, which argues for acquiring rarely and
+predictably rather than silently and often.
+
+(The related question of *which* audio processing constraints are requested at
+acquisition — automatic gain control, echo cancellation, noise suppression —
+is a separate defect with its own issue. It is not decided here.)
+
+### How this is normally solved
+
+Digital audio workstations open the audio device persistently — Ableton's
+audio engine, Pro Tools' Playback Engine — and run a continuous callback,
+so recording sets a flag rather than starting a device, and punch-in is
+sample-accurate because nothing is negotiated at the punch point. Two things
+make that acceptable, and both inform the decision below: the device going
+hot is an explicit, visible act (**record-arm**), not a silent background
+state; and idle release exists, Reaper offering to close the audio device
+when stopped and inactive.
+
+The analogy is directional rather than literal. A DAW negotiates exclusive
+access to an audio interface, where reopening is genuinely expensive; and no
+DAW holds a camera open. The privacy weight of a lit camera indicator has no
+equivalent in Ableton, and is why "hold the device for the whole session" is
+not simply inherited here.
+
 ## Decision
 
-**Separate device acquisition from recording.** Acquiring the camera and
-microphone becomes a distinct step from starting and stopping a Take's
-recording. The stream is acquired once and held for the session; per Take,
-only the `MediaRecorder` is started and stopped. `stopCapture` stops
-recording without releasing the device.
+**Introduce arming as an explicit step, distinct from recording.** Acquiring
+the camera and microphone becomes something the performer does — arming —
+rather than a side effect of pressing record. While armed, the stream is held
+open; per Take, only the `MediaRecorder` is started and stopped. `stopCapture`
+stops recording without disarming.
 
-This makes ADR 0003's premise true rather than working around its being
-false. Capture can begin when the Count-in ends because there is nothing left
-to negotiate at that moment.
+**Arming completes before the lead-in begins.** Recording an unarmed Track
+arms it first and waits for readiness, and only then starts the Count-in
+Padding. Acquisition is deliberately *not* hidden inside the padding: ADR 0003
+made the padding a fixed interval so that the gap between pressing record and
+the first counted beat is the same every time and can be learned, and
+acquisition varies by 581ms. Hiding it there would either make the lead-in
+variable or pad every recording to the worst case. Placing it ahead of the
+lead-in keeps the lead-in exactly fixed, and puts acquisition's variance in
+dead time, before any timing reference exists. That wait must be visible as
+its own state — a variable pause with no explanation reads as a hang.
+
+**Readiness means more than the acquisition promise resolving.** A resolved
+`getUserMedia` means a stream object exists, not that frames are flowing:
+cameras ramp exposure and gain, and a `MediaRecorder` started at that instant
+can produce media whose opening is missing or dark. Arming is complete only on
+a positive signal that the device is actually delivering. Without this the
+decision merely moves the delay instead of removing it, and — worse — moves it
+somewhere the diagnostics report cannot see, since capture would appear to
+start on time while the media was short at the front.
+
+**Disarm on idle, not on stop.** A Take is by definition one attempt, and a
+Track holds several for comparison, so retakes are the common case and must
+not each pay the wait or lose the performer's gain. The device is released
+after a period of inactivity rather than immediately after a Take. This is
+Reaper's idle-release behaviour, and it recovers most of what
+persistent-holding offers at almost none of its cost.
+
+**Holding is an action, not a preference.** A mode setting was considered and
+rejected. It would be a preference the performer must first understand to set
+correctly, and it leaves the device's state invisible. Arming is a visible
+act with visible state: armed means the device is hot, the gain is the
+performer's own, and retakes are immediate. It also matches the muscle memory
+of every DAW, and it is the affordance that makes holding a device legible
+rather than covert.
 
 **`Offset` keeps its current meaning.** The alternative — stamping actual
 capture start and folding the residual into the Take's Offset — was
@@ -94,7 +161,7 @@ would have to know which part was which. `CONTEXT.md` needs no amendment
 under the decision taken here.
 
 **The residual is measured, not assumed.** `MediaRecorder.start()` on an
-already-live stream is expected to be fast, but "expected to be" is what
+already-armed stream is expected to be fast, but "expected to be" is what
 produced this ADR. `captureStart.delayAfterCountInMs` stays in the
 diagnostics report as a standing guard: if it is small and stable the premise
 holds, and if it is not that is visible immediately rather than by ear. The
@@ -148,23 +215,30 @@ green over it.
 ## Consequences
 
 - Cross-Track sync error from this cause goes to whatever
-  `MediaRecorder.start()` costs on a live stream, instead of 349-931ms per
+  `MediaRecorder.start()` costs on an armed stream, instead of 349-931ms per
   Take.
-- A held-open camera and microphone means the OS recording indicator stays lit
-  for the session rather than per Take, and the device is unavailable to other
-  applications throughout. This is a visible behavioural change for the
-  performer and is the real price of the decision.
+- A performer's gain staging survives across Takes, because the device is not
+  reopened between them.
+- Arming introduces a state the app did not have, and every entry point to
+  recording must account for it. This is the bulk of the work and the main
+  risk: the capture seam currently has no concept of a device being open
+  between Takes, and `FakeCaptureAdapter` will need to model one.
+- The OS recording indicator is lit while armed rather than only while
+  recording. This is a real change and the honest price of the decision. It is
+  bounded by idle release and made legible by arming being an explicit act,
+  but it is not eliminated.
 - Acquisition failure moves earlier and becomes a separate failure mode:
-  permission denial or an absent device now surfaces when acquiring rather
-  than at the end of a Count-in. This is an improvement — failing after
-  counting a performer in is worse — but it is new handling, not free.
-- The capture seam gains a lifecycle it did not have. `CaptureAdapter`
-  currently has no concept of a device being open between Takes, and
-  `FakeCaptureAdapter` will need to model one.
-- Session length now matters in a way it did not: a stream held for an hour
-  may be reclaimed by the OS, a laptop may sleep, a device may be unplugged.
-  Recovery from a stream that has died mid-session is new work this ADR
+  permission denial or an absent device surfaces on arming rather than at the
+  end of a Count-in. This is an improvement — failing after counting a
+  performer in is worse — but it is new handling, not free.
+- Recording an unarmed Track now has a variable pause before the lead-in,
+  where previously the pause sat invisibly *inside* the lead-in, corrupting
+  it. Surfacing the wait is better than hiding it, but it is more visible
+  waiting than before for a performer who never arms explicitly.
+- A stream held while armed can still be lost — OS reclaim, sleep, an
+  unplugged device. Idle release shortens the window rather than closing it,
+  and recovery from a stream that has died while armed is new work this ADR
   creates and does not solve.
 - The measurements here are from one machine on one date. The shape of the
-  finding — that acquisition is per-Take and variable — is expected to be
-  portable; the specific milliseconds are not.
+  finding — that acquisition is per-Take, variable, and destructive to device
+  settings — is expected to be portable; the specific milliseconds are not.
