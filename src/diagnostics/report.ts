@@ -7,6 +7,7 @@ import type {
   DiagnosticsReport,
   IntervalMeasurement,
   ProjectSummary,
+  ScenarioSummary,
 } from "./types";
 
 export interface ReportContext {
@@ -16,6 +17,8 @@ export interface ReportContext {
   audioClock: AudioClockSession | null;
   /** What the capture adapter read back off the granted track; null if nothing has been captured. */
   audioProcessing: AudioProcessingState | null;
+  /** The scenario parameters this pass was run with, for a synthetic scenario report; null for an ordinary manual pass. */
+  scenario: ScenarioSummary | null;
 }
 
 /**
@@ -118,6 +121,7 @@ export function buildReport(
     project: context.project,
     audioClock: context.audioClock,
     audioProcessing: context.audioProcessing,
+    scenario: context.scenario,
     padding,
     countIn,
     captureStart,

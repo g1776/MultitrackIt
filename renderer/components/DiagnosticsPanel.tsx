@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   captureAdapter,
+  countInAdapter,
   diagnosticsStorage,
   engine,
   engineEventLog,
@@ -11,6 +12,15 @@ import {
   guideWouldBeSilentWhileRecording,
   summariseProject,
 } from "../../src/diagnostics/report";
+import { EngineEventLog } from "../../src/diagnostics/eventLog";
+import {
+  DEFAULT_SCENARIO_PARAMS,
+  runSyntheticScenario,
+  type ScenarioParams,
+  type ScenarioProgress,
+} from "../../src/diagnostics/scenario";
+
+type ConfigurableScenarioParams = Pick<ScenarioParams, "trackCount" | "tempoBpm" | "beatCount">;
 
 /**
  * The diagnostics instrument, deliberately separate from the recording UI
@@ -30,6 +40,16 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
   // path. Re-reading on demand is enough for an instrument driven by hand.
   const [events, setEvents] = useState(() => engineEventLog.getEvents());
 
+  const [scenarioParams, setScenarioParams] = useState<ConfigurableScenarioParams>({
+    trackCount: DEFAULT_SCENARIO_PARAMS.trackCount,
+    tempoBpm: DEFAULT_SCENARIO_PARAMS.tempoBpm,
+    beatCount: DEFAULT_SCENARIO_PARAMS.beatCount,
+  });
+  const [scenarioRunning, setScenarioRunning] = useState(false);
+  const [scenarioProgress, setScenarioProgress] = useState<ScenarioProgress | null>(null);
+  const [scenarioWrittenPath, setScenarioWrittenPath] = useState<string | null>(null);
+  const [scenarioError, setScenarioError] = useState<string | null>(null);
+
   const project = summariseProject(engine.getActiveProject());
   const guideSilent = guideWouldBeSilentWhileRecording(project);
   // Read at render (like the log itself) rather than held in state: it changes
@@ -44,10 +64,50 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
         project: summariseProject(engine.getActiveProject()),
         audioClock: playbackAdapter.getAudioClockSession() ?? null,
         audioProcessing: captureAdapter.getAudioProcessing() ?? null,
+        scenario: null,
       });
       setWrittenPath(await diagnosticsStorage.writeReport(report));
     } catch (e) {
       setError((e as Error).message);
+    }
+  }
+
+  /**
+   * Runs the default synthetic sync scenario end to end and writes its own
+   * report — no microphone, no camera, no human, driven through the real
+   * record/stop path with real Padding and Count-in (ADR 0004). Uses a
+   * dedicated event log rather than the panel's own `engineEventLog`, so the
+   * written report covers exactly this run's three passes, never events from
+   * whatever the performer was doing by hand before pressing the button.
+   */
+  async function runScenario(): Promise<void> {
+    setScenarioError(null);
+    setScenarioWrittenPath(null);
+    setScenarioProgress(null);
+    setScenarioRunning(true);
+    const scenarioEvents = new EngineEventLog(
+      () => playbackAdapter.getAudioContext().currentTime * 1000
+    );
+    try {
+      const result = await runSyntheticScenario({
+        playback: playbackAdapter,
+        countIn: countInAdapter,
+        events: scenarioEvents,
+        params: scenarioParams,
+        onProgress: setScenarioProgress,
+      });
+      const report = buildReport(scenarioEvents.getEvents(), {
+        createdAt: new Date().toISOString(),
+        project: summariseProject(result.project),
+        audioClock: playbackAdapter.getAudioClockSession() ?? null,
+        audioProcessing: null,
+        scenario: result.params,
+      });
+      setScenarioWrittenPath(await diagnosticsStorage.writeReport(report));
+    } catch (e) {
+      setScenarioError((e as Error).message);
+    } finally {
+      setScenarioRunning(false);
     }
   }
 
@@ -107,6 +167,65 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
       )}
       {writtenPath && <p className="hint">Wrote {writtenPath}</p>}
       {error && <p className="error">{error}</p>}
+
+      <h3>Synthetic Sync Scenario</h3>
+      <p className="hint">
+        Runs a full scenario with no microphone, no camera, and no human: separate Tracks of one
+        Take each, recorded through the real record/stop path with real Padding and Count-in.
+        Writes one report covering all passes when it finishes. A run takes real time.
+      </p>
+
+      <div className="panel">
+        <label>
+          Tracks
+          <input
+            type="number"
+            min={1}
+            value={scenarioParams.trackCount}
+            disabled={scenarioRunning}
+            onChange={(e) =>
+              setScenarioParams((p) => ({ ...p, trackCount: Number(e.target.value) }))
+            }
+          />
+        </label>
+        <label>
+          Tempo (bpm)
+          <input
+            type="number"
+            min={1}
+            value={scenarioParams.tempoBpm}
+            disabled={scenarioRunning}
+            onChange={(e) =>
+              setScenarioParams((p) => ({ ...p, tempoBpm: Number(e.target.value) }))
+            }
+          />
+        </label>
+        <label>
+          Beats
+          <input
+            type="number"
+            min={1}
+            value={scenarioParams.beatCount}
+            disabled={scenarioRunning}
+            onChange={(e) =>
+              setScenarioParams((p) => ({ ...p, beatCount: Number(e.target.value) }))
+            }
+          />
+        </label>
+        <button onClick={() => void runScenario()} disabled={scenarioRunning}>
+          {scenarioRunning ? "Running…" : "Run Synthetic Scenario"}
+        </button>
+      </div>
+
+      {scenarioProgress && (
+        <p className="value">
+          {scenarioProgress.trackIndex < scenarioProgress.trackCount
+            ? `Recording Track ${scenarioProgress.trackIndex + 1} of ${scenarioProgress.trackCount}…`
+            : `Recorded ${scenarioProgress.trackCount} Track(s). Writing report…`}
+        </p>
+      )}
+      {scenarioWrittenPath && <p className="hint">Wrote {scenarioWrittenPath}</p>}
+      {scenarioError && <p className="error">{scenarioError}</p>}
     </section>
   );
 }

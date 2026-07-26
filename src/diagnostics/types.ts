@@ -112,6 +112,20 @@ export interface ProjectSummary {
 }
 
 /**
+ * The parameters a synthetic sync scenario was run with (ADR 0004), so the
+ * run is reproducible from its own report rather than from whatever
+ * defaults happened to be current when it ran.
+ */
+export interface ScenarioSummary {
+  trackCount: number;
+  tempoBpm: number;
+  beatsPerBar: number;
+  beatCount: number;
+  /** Simulated capture-device acquisition delay (ms) the run was made with; 0 for a healthy-device run. */
+  armDelayMs: number;
+}
+
+/**
  * A written record of one recording or playback pass: the Project it ran
  * against, the lead-in as both asked for and measured, and the full event
  * timeline including every schedule entry's computed start time and
@@ -125,6 +139,8 @@ export interface DiagnosticsReport {
   audioClock: AudioClockSession | null;
   /** The processing the captured audio actually passed through. Null before any capture. */
   audioProcessing: AudioProcessingState | null;
+  /** Present only for a synthetic sync scenario run; null for an ordinary manual pass. */
+  scenario: ScenarioSummary | null;
   padding: IntervalMeasurement;
   countIn: CountInMeasurement;
   captureStart: CaptureStartMeasurement;

@@ -31,6 +31,7 @@ function report(events: TimestampedEngineEvent[]) {
     project: PROJECT,
     audioClock: AUDIO_CLOCK,
     audioProcessing: null,
+    scenario: null,
   });
 }
 
@@ -158,6 +159,7 @@ describe("buildReport audioClock", () => {
       project: PROJECT,
       audioClock: null,
       audioProcessing: null,
+      scenario: null,
     });
 
     expect(built.audioClock).toBeNull();
@@ -176,6 +178,7 @@ describe("buildReport audioProcessing", () => {
       project: PROJECT,
       audioClock: AUDIO_CLOCK,
       audioProcessing,
+      scenario: null,
     });
 
     expect(built.audioProcessing).toEqual(audioProcessing);
@@ -184,6 +187,25 @@ describe("buildReport audioProcessing", () => {
 
   it("says nothing about processing for a pass that never captured", () => {
     expect(report([]).audioProcessing).toBeNull();
+  });
+});
+
+describe("buildReport scenario", () => {
+  it("states the scenario parameters a synthetic run was made with, so it's reproducible from its own report", () => {
+    const scenario = { trackCount: 3, tempoBpm: 100, beatsPerBar: 4, beatCount: 16, armDelayMs: 0 };
+    const built = buildReport([], {
+      createdAt: CREATED_AT,
+      project: PROJECT,
+      audioClock: AUDIO_CLOCK,
+      audioProcessing: null,
+      scenario,
+    });
+
+    expect(built.scenario).toEqual(scenario);
+  });
+
+  it("is null for an ordinary manual pass", () => {
+    expect(report([]).scenario).toBeNull();
   });
 });
 
