@@ -185,6 +185,17 @@ export interface LoopbackSummary {
   bpm: number;
   beatsPerBar: number;
   beatCount: number;
+  /**
+   * How many Takes were recorded in sequence against the shared Guide.
+   * Optional/absent means 1 (a solo take) for reports written before this
+   * field existed. A value above 1 means every Take after the first was
+   * recorded while monitoring every earlier one *plus* the Guide together —
+   * a real overdub, not just a Guide-only capture — since none of the
+   * existing capture-only checks (Mode A, Mode B) ever recorded more than
+   * one Take, and the app's actual overdub-monitoring condition is exactly
+   * what none of them could catch.
+   */
+  trackCount?: number;
 }
 
 /**
@@ -240,6 +251,15 @@ export interface DiagnosticsReport {
   loopback: LoopbackSummary | null;
   /** Present only once a loopback run's capture has been analysed; null otherwise. */
   loopbackAnalysis: LoopbackAnalysisResult | null;
+  /**
+   * Every recorded Take's own analysis, in recording order, for a multi-Take
+   * loopback run (`LoopbackSummary.trackCount` above 1). `loopbackAnalysis`
+   * alone only ever shows the *last* Take (the overdub of interest), so a
+   * reader who needs the earlier, solo Take(s) for comparison — e.g. "is
+   * only the overdub truncated, or the solo Take too?" — needs this array.
+   * Absent/null for anything but a multi-Take loopback run.
+   */
+  loopbackAnalyses?: LoopbackAnalysisResult[] | null;
   padding: IntervalMeasurement;
   countIn: CountInMeasurement;
   captureStart: CaptureStartMeasurement;

@@ -32,6 +32,8 @@ export interface ReportContext {
   loopback: LoopbackSummary | null;
   /** The loopback run's own analysis, once its capture has been analysed; null otherwise. */
   loopbackAnalysis: LoopbackAnalysisResult | null;
+  /** Every Take's own analysis for a multi-Take loopback run; null/absent otherwise. */
+  loopbackAnalyses?: LoopbackAnalysisResult[] | null;
 }
 
 /**
@@ -153,6 +155,7 @@ export function buildReport(
     analysis: context.analysis,
     loopback: context.loopback,
     loopbackAnalysis: context.loopbackAnalysis,
+    loopbackAnalyses: context.loopbackAnalyses ?? null,
     padding,
     countIn,
     captureStart,

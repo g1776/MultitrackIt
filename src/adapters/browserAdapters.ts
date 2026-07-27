@@ -297,21 +297,16 @@ async function decodeAudioBuffer(mediaRef: string, audioContext: AudioContext): 
 }
 
 /**
- * A decoded buffer takes real, non-negligible time to fetch+decode — time
- * that elapses *after* `play()` has already committed to a reference instant
- * (`referenceTime`/`videoAnchorTime`) every entry's `contextStartTime` is
- * fixed relative to. Longer media (e.g. a Guide covering more bars, or a
- * slower tempo stretching the same bar count over more real seconds) takes
- * longer to decode, and once decode outlasts the gap before a schedule's
- * own `contextStartTime`, `source.start()` clamps to "now" instead of the
- * intended instant — the entry starts audibly late/early relative to
- * everything else already anchored to that reference (the Count-in, the
- * video grid, other already-decoded entries), which is what actually
- * sounded like a dropped or early first beat. The Guide and every
+ * A decoded buffer takes real, non-negligible time to fetch+decode —
+ * `play()` now decodes before committing to a reference instant
+ * (`referenceTime`/`videoAnchorTime`) precisely so that time can never eat
+ * into a schedule already anchored to one (see `play()`). Caching by
+ * `mediaRef` is still worth doing on top of that: the Guide and every
  * previously-recorded Take's media are replayed on every subsequent
- * recordTake()/composite playback in a session, so caching each decode by
- * `mediaRef` makes every replay after the first a synchronous cache hit —
- * no decode time left to eat into the schedule at all.
+ * recordTake()/composite playback in a session, so this makes every replay
+ * after the first a synchronous cache hit — decode adds no delay to *any*
+ * playback pass, first or repeat, rather than only the pass whose reference
+ * instant it can no longer distort.
  */
 const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
 
@@ -378,26 +373,34 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
     const audioContext = this.getAudioContext();
     if (audioContext.state === "suspended") await audioContext.resume();
 
-    // No artificial lead added here: playback (unlike recording, which has
-    // its own visible Count-in) must stay as immediate as before — any
-    // buffering happens silently against this same reference instant
-    // rather than delaying it.
+    // Decoded before the reference time is read, not after: a Monitor Mix
+    // overdubbing even one prior Take has to decode that Take's real,
+    // recorder-produced audio (not a small synthetic click track), which
+    // easily takes longer than a short Count-in Padding — long enough that
+    // reading `currentTime` first and decoding after used to let decode
+    // outlast the gap before an entry's own `contextStartTime`, silently
+    // clamping that entry (often the Guide) to start late. Every other
+    // caller anchored to this schedule (the Count-in via
+    // `getScheduledStartDelayMs`, the video grid) reads the anchor only
+    // after `play()` resolves, so deferring the reference time to here costs
+    // nothing — it just means the anchor they read is the real one, not one
+    // already broken by the clamp it was meant to describe. This is what
+    // actually fixes cross-Take drift: a `<video>` element's `.play()` gives
+    // no guarantee about when audio truly starts flowing, and that startup
+    // cost varies independently per file. An `AudioBufferSourceNode` has
+    // none of that: once decoded, `start(time)` is scheduled
+    // sample-accurately against this same `AudioContext` clock by the
+    // platform itself.
+    const buffers = await Promise.all(
+      schedule.entries.map((entry) => getCachedAudioBuffer(entry.mediaRef, audioContext))
+    );
+
+    // No artificial lead added beyond decode itself: once decode is done,
+    // playback starts as immediately as possible — any further buffering
+    // happens silently against this same reference instant rather than
+    // delaying it.
     const referenceTime = audioContext.currentTime;
     const graphSchedule = computeAudioGraphSchedule(schedule, referenceTime);
-
-    // Decoded together, before any node starts: every entry's audio is
-    // ready before scheduling begins, so a slow decode delays every source
-    // by the same shared amount (harmless — relative sync is unaffected)
-    // rather than letting one file's decode time desync it from the rest.
-    // This is what actually fixes cross-Take drift: a `<video>` element's
-    // `.play()` gives no guarantee about when audio truly starts flowing,
-    // and that startup cost varies independently per file. An
-    // `AudioBufferSourceNode` has none of that: once decoded,
-    // `start(time)` is scheduled sample-accurately against this same
-    // `AudioContext` clock by the platform itself.
-    const buffers = await Promise.all(
-      graphSchedule.entries.map((entry) => getCachedAudioBuffer(entry.mediaRef, audioContext))
-    );
 
     const elements: HTMLVideoElement[] = [];
     const gainsByTakeId = new Map<string, GainNode>();

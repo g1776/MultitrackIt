@@ -8,6 +8,7 @@ import {
   micCaptureAdapter,
   playbackAdapter,
 } from "../store/engine";
+import type { CaptureAdapter } from "../../src/engine/adapters";
 import {
   buildReport,
   guideWouldBeSilentWhileRecording,
@@ -84,6 +85,19 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
   const [loopbackError, setLoopbackError] = useState<string | null>(null);
   const [loopbackAnalysis, setLoopbackAnalysis] =
     useState<LoopbackAnalysisResult | null>(null);
+  /**
+   * Which physical capture pipeline Acoustic Loopback exercises. Defaults to
+   * the diagnostics-only, audio-only `micCaptureAdapter` (unchanged
+   * behaviour). "Real recording path" instead runs the same test against
+   * `captureAdapter` — the combined audio+video `BrowserCaptureAdapter` a
+   * real Take is actually recorded through — since a bug specific to muxing
+   * audio alongside video in one `MediaRecorder` would never show up against
+   * the audio-only adapter, no matter how many times Mode A/the Full Suite
+   * pass.
+   */
+  const [loopbackCapturePath, setLoopbackCapturePath] = useState<"mic" | "production">("mic");
+  const [loopbackCaptureUsed, setLoopbackCaptureUsed] = useState<"mic" | "production" | null>(null);
+  const [loopbackAnalyses, setLoopbackAnalyses] = useState<LoopbackAnalysisResult[] | null>(null);
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [fullSuiteRunning, setFullSuiteRunning] = useState(false);
@@ -211,13 +225,17 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
     setLoopbackError(null);
     setLoopbackWrittenPath(null);
     setLoopbackAnalysis(null);
+    setLoopbackAnalyses(null);
     setLoopbackRunning(true);
+    const capture: CaptureAdapter =
+      loopbackCapturePath === "production" ? captureAdapter : micCaptureAdapter;
+    setLoopbackCaptureUsed(loopbackCapturePath);
     const loopbackEvents = new EngineEventLog(
       () => playbackAdapter.getAudioContext().currentTime * 1000,
     );
     try {
       const result = await runLoopbackScenario({
-        capture: micCaptureAdapter,
+        capture,
         playback: playbackAdapter,
         countIn: countInAdapter,
         metronomeAudio: generateMetronomeGuideAudio,
@@ -226,6 +244,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
         params: loopbackParams,
       });
       setLoopbackAnalysis(result.analysis);
+      setLoopbackAnalyses(result.analyses);
       const report = buildReport(loopbackEvents.getEvents(), {
         createdAt: new Date().toISOString(),
         project: summariseProject(result.project),
@@ -236,6 +255,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
         analysis: null,
         loopback: result.params,
         loopbackAnalysis: result.analysis,
+        loopbackAnalyses: result.analyses,
       });
       setLoopbackWrittenPath(await diagnosticsStorage.writeReport(report));
     } catch (e) {
@@ -440,8 +460,41 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
             environment-specific, not a portable assertion. Writes its own
             report, distinct from the Synthetic Sync Scenario's.
           </p>
+          <p className="hint">
+            "Microphone only" tests the diagnostics-only audio capture path,
+            not what a real Take is recorded through. "Camera + Microphone"
+            instead runs this same test against the actual production capture
+            adapter (audio muxed with video in one recorder) — it will turn on
+            your camera for the duration of the take. Use it to check whether
+            combining video with audio in one recording introduces a delay or
+            truncation at the start that the audio-only path can't reveal.
+          </p>
+          <p className="hint">
+            "Tracks" above 1 records that many Takes in sequence against the
+            same Guide — every Take after the first is recorded while
+            monitoring every earlier Take *plus* the Guide together, a real
+            overdub. Each Take's own analysis is shown separately below, so a
+            truncation/delay that only shows up on Take 2+ (not Take 1 alone)
+            points at the overdub-monitoring condition specifically, not raw
+            capture.
+          </p>
 
           <div className="panel">
+            <label>
+              Capture path
+              <select
+                value={loopbackCapturePath}
+                disabled={loopbackRunning}
+                onChange={(e) =>
+                  setLoopbackCapturePath(e.target.value as "mic" | "production")
+                }
+              >
+                <option value="mic">Microphone only (diagnostics)</option>
+                <option value="production">
+                  Camera + Microphone (real recording path)
+                </option>
+              </select>
+            </label>
             <label>
               Tempo (bpm)
               <input
@@ -487,6 +540,21 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
                 }
               />
             </label>
+            <label>
+              Tracks
+              <input
+                type="number"
+                min={1}
+                value={loopbackParams.trackCount ?? 1}
+                disabled={loopbackRunning}
+                onChange={(e) =>
+                  setLoopbackParams((p) => ({
+                    ...p,
+                    trackCount: Number(e.target.value),
+                  }))
+                }
+              />
+            </label>
             <button
               onClick={() => void runLoopback()}
               disabled={loopbackRunning}
@@ -495,26 +563,55 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
             </button>
           </div>
 
-          {loopbackAnalysis && loopbackAnalysis.noOnsetsDetected && (
-            <p className="hint">
-              No onsets detected — likely headphones instead of speakers, or
-              speakers muted. Check your output device and try again.
-            </p>
-          )}
-          {loopbackAnalysis && !loopbackAnalysis.noOnsetsDetected && (
+          {loopbackAnalysis && (
             <p className="value">
-              Round-trip latency: {loopbackAnalysis.roundTripLatencyMs}ms
+              Capture path used:{" "}
+              {loopbackCaptureUsed === "production"
+                ? "Camera + Microphone (real recording path)"
+                : "Microphone only (diagnostics)"}
             </p>
           )}
+          {loopbackAnalyses &&
+            loopbackAnalyses.map((a, i) => (
+              <div key={i} className="panel">
+                <p className="value">
+                  Take {i + 1}
+                  {loopbackAnalyses.length > 1
+                    ? i === 0
+                      ? " (solo)"
+                      : ` (overdub over Take${i > 1 ? "s" : ""} 1${i > 1 ? `-${i}` : ""} + Guide)`
+                    : ""}
+                </p>
+                {a.noOnsetsDetected ? (
+                  <p className="hint">
+                    No onsets detected — likely headphones instead of
+                    speakers, or speakers muted. Check your output device and
+                    try again.
+                  </p>
+                ) : (
+                  <>
+                    <p className="value">
+                      Round-trip latency: {a.roundTripLatencyMs}ms
+                    </p>
+                    {a.track.missingBeatIndices.length > 0 && (
+                      <p className="error">
+                        Missing beat indices (never detected at all):{" "}
+                        {a.track.missingBeatIndices.join(", ")}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            ))}
           {loopbackWrittenPath && (
             <p className="hint">Wrote {loopbackWrittenPath}</p>
           )}
           {loopbackError && <p className="error">{loopbackError}</p>}
-          {loopbackAnalysis && (
+          {loopbackAnalyses && loopbackAnalyses.length > 0 && (
             <WaveformCanvas
               analysis={{
                 simulatedLatencyMs: 0,
-                tracks: [loopbackAnalysis.track],
+                tracks: loopbackAnalyses.map((a) => a.track),
               }}
             />
           )}

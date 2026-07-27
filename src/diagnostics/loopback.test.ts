@@ -33,7 +33,7 @@ describe("runLoopbackScenario", () => {
     const { params } = await runLoopbackScenario(
       options({ params: { bpm: 120, beatCount: 8 } })
     );
-    expect(params).toEqual({ bpm: 120, beatsPerBar: 4, beatCount: 8 });
+    expect(params).toEqual({ bpm: 120, beatsPerBar: 4, beatCount: 8, trackCount: 1 });
   });
 
   it("gives the ephemeral Project a real Metronome Guide, audible in Monitor Mix, matching its own tempo", async () => {
@@ -86,10 +86,45 @@ describe("runLoopbackScenario", () => {
     expect(durationMs).toBeGreaterThan(signalDurationMs);
   });
 
-  it.each([{ bpm: 0 }, { beatsPerBar: 0 }, { beatCount: 0 }])(
+  it.each([{ bpm: 0 }, { beatsPerBar: 0 }, { beatCount: 0 }, { trackCount: 0 }, { trackCount: 1.5 }])(
     "rejects an invalid configuration %o",
     async (overrides) => {
       await expect(runLoopbackScenario(options({ params: overrides }))).rejects.toThrow();
     }
   );
+
+  it("records trackCount Takes in sequence, each a fresh Track, monitoring every earlier one plus the Guide", async () => {
+    const capture = new FakeCaptureAdapter();
+    const { project, analyses } = await runLoopbackScenario(
+      options({ capture, params: { trackCount: 3 } })
+    );
+
+    expect(capture.startedHandles).toHaveLength(3);
+    expect(project.tracks).toHaveLength(3);
+    expect(analyses).toHaveLength(3);
+    // recordTake(undefined) always creates a fresh Track, and every prior
+    // Track is already selected by the time the next is recorded — so by the
+    // third Take, the first two Tracks are both eligible Monitor Mix entries.
+    expect(project.tracks[2].id).not.toBe(project.tracks[0].id);
+    expect(project.tracks[2].id).not.toBe(project.tracks[1].id);
+  });
+
+  it("analyses every recorded Take against the same shared Guide schedule, in recording order", async () => {
+    const decode = vi
+      .fn()
+      .mockResolvedValueOnce({ samples: new Float32Array(100), sampleRate: 48000 })
+      .mockResolvedValueOnce({ samples: new Float32Array(48000), sampleRate: 48000 });
+    const { project, analyses, analysis } = await runLoopbackScenario(
+      options({ decode, params: { trackCount: 2, beatCount: 4 } })
+    );
+
+    expect(analyses).toHaveLength(2);
+    expect(analyses[0].track.expectedBeatTimesMs).toEqual(analyses[1].track.expectedBeatTimesMs);
+    // The last analysis is the one `analysis` (singular) surfaces, matching
+    // solo-take behaviour where `analysis`/`analyses[0]` are the same thing.
+    expect(analysis).toBe(analyses[1]);
+    expect(analyses[1].noOnsetsDetected).toBe(true);
+    expect(decode).toHaveBeenNthCalledWith(1, project.tracks[0].takes[0].mediaRef, expect.anything());
+    expect(decode).toHaveBeenNthCalledWith(2, project.tracks[1].takes[0].mediaRef, expect.anything());
+  });
 });

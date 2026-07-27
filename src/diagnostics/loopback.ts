@@ -10,6 +10,15 @@ export interface LoopbackParams {
   bpm: number;
   beatsPerBar: number;
   beatCount: number;
+  /**
+   * How many Takes to record in sequence against the shared Guide. Defaults
+   * to 1 (a solo take, this scenario's original behaviour). A value above 1
+   * records each Take after the first while monitoring every earlier Take
+   * *plus* the Guide together — a real overdub — since that's the one
+   * condition none of the existing capture checks (Mode A solo, Mode B
+   * synthetic) ever recorded through a real capture adapter.
+   */
+  trackCount?: number;
 }
 
 /**
@@ -21,6 +30,7 @@ export const DEFAULT_LOOPBACK_PARAMS: LoopbackParams = {
   bpm: 100,
   beatsPerBar: 4,
   beatCount: 16,
+  trackCount: 1,
 };
 
 /**
@@ -36,6 +46,9 @@ function resolveParams(overrides: Partial<LoopbackParams> | undefined): Loopback
   if (!(params.bpm > 0)) throw new Error("bpm must be positive");
   if (!(params.beatsPerBar > 0)) throw new Error("beatsPerBar must be positive");
   if (!(params.beatCount > 0)) throw new Error("beatCount must be positive");
+  if (!(Number.isInteger(params.trackCount ?? 1) && (params.trackCount ?? 1) > 0)) {
+    throw new Error("trackCount must be a positive whole number");
+  }
   return params;
 }
 
@@ -67,7 +80,10 @@ export interface RunLoopbackScenarioOptions {
 export interface LoopbackScenarioResult {
   project: Project;
   params: LoopbackSummary;
+  /** The last recorded Take's analysis — the overdub of interest when `trackCount` is above 1, or the only Take otherwise. */
   analysis: LoopbackAnalysisResult;
+  /** Every recorded Take's own analysis, in recording order — see `LoopbackParams.trackCount`. */
+  analyses: LoopbackAnalysisResult[];
 }
 
 /**
@@ -117,16 +133,20 @@ export async function runLoopbackScenario(
   // not more Guide for it to play.
   engine.generateMetronomeGuide({ durationMs: signalDurationMs });
 
-  await engine.recordTake(undefined);
-  await sleep(captureDurationMs);
-  await engine.stopRecording();
+  const trackCount = params.trackCount ?? 1;
+  // Each Take after the first is recorded through the *same* real
+  // recordTake()/stopRecording() path while every earlier Take is already
+  // selected and sitting in the Monitor Mix alongside the Guide — a genuine
+  // overdub, not just a second solo capture — since a real capture adapter
+  // has never been driven through more than one Take before (Mode A always
+  // recorded exactly one).
+  for (let trackIndex = 0; trackIndex < trackCount; trackIndex++) {
+    await engine.recordTake(undefined);
+    await sleep(captureDurationMs);
+    await engine.stopRecording();
+  }
 
   const project = engine.getActiveProject() as Project;
-  // stopRecording() always pushes exactly one Take onto the fresh Track
-  // recordTake() just created, so this is always present.
-  const take = project.tracks[0].takes[0];
-  const decoded = await decode(take.mediaRef, options.audioContext);
-
   // Sourced from the real Guide's own schedule rather than computed
   // independently (ADR 0006), so the expectation can never disagree with
   // what was actually scheduled and played.
@@ -134,5 +154,15 @@ export async function runLoopbackScenario(
   if (!schedule) throw new Error("Loopback Project has no Metronome Guide schedule to analyse against");
   const expectedBeatTimesMs = schedule.slice(0, params.beatCount).map((click) => click.atMs);
 
-  return { project, params, analysis: analyseLoopback(decoded, expectedBeatTimesMs) };
+  // One Track per recorded Take (recordTake(undefined) always creates a
+  // fresh Track), in recording order — so `analyses[i]` is the i-th Take
+  // recorded, regardless of Track id assignment.
+  const analyses = await Promise.all(
+    project.tracks.map(async (track) => {
+      const decoded = await decode(track.takes[0].mediaRef, options.audioContext);
+      return analyseLoopback(decoded, expectedBeatTimesMs);
+    })
+  );
+
+  return { project, params, analysis: analyses[analyses.length - 1], analyses };
 }
