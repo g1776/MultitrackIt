@@ -41,6 +41,17 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
   private audioProcessing: AudioProcessingState | undefined;
   private armedStream: MediaStream | undefined;
 
+  /**
+   * Reads back the real, already-open `AudioContext` that actually drives
+   * Monitor Mix/Guide/Take playback (`BrowserPlaybackAdapter.getAudioContext`)
+   * — its `outputLatency` describes the audio graph this Take was genuinely
+   * monitored through. Optional only so this class stays constructible
+   * without a real `AudioContext` in tests; omitting it falls back to a
+   * disposable, disconnected context whose latency estimate bears no
+   * relation to the real output path and should not be trusted in production.
+   */
+  constructor(private getSharedAudioContext?: () => AudioContext) {}
+
   isArmed(): boolean {
     return this.armedStream !== undefined;
   }
@@ -98,7 +109,10 @@ export class BrowserCaptureAdapter implements CaptureAdapter {
     // this Take's own stop.
     this.active.delete(handle.id);
     if (this.activeCaptureId === handle.id) this.activeCaptureId = undefined;
-    this.latencyByHandleId.set(handle.id, estimateMonitorOutputLatencyMs());
+    this.latencyByHandleId.set(
+      handle.id,
+      estimateMonitorOutputLatencyMs(this.getSharedAudioContext?.())
+    );
 
     const blob = new Blob(active.chunks, { type: active.recorder.mimeType });
     return URL.createObjectURL(blob);
@@ -234,7 +248,22 @@ function waitForFirstFrame(stream: MediaStream): Promise<void> {
   });
 }
 
-function estimateMonitorOutputLatencyMs(): number | undefined {
+/**
+ * `sharedAudioContext`, when given, is the real context Monitor Mix/Guide
+ * audio is actually being played through — its `outputLatency` reflects the
+ * real, currently-open output stream. Without it, this falls back to a
+ * throwaway context that was never connected to any real output, whose
+ * `outputLatency` reflects nothing about how this Take was actually
+ * monitored and varies noisily call to call — that fallback exists only so
+ * this function stays callable without a real `AudioContext`, not because
+ * its answer is meaningful in production.
+ */
+function estimateMonitorOutputLatencyMs(sharedAudioContext?: AudioContext): number | undefined {
+  if (sharedAudioContext) {
+    const outputLatencySec = sharedAudioContext.outputLatency || sharedAudioContext.baseLatency || 0;
+    return outputLatencySec > 0 ? outputLatencySec * 1000 : undefined;
+  }
+
   if (typeof AudioContext === "undefined") return undefined;
 
   const audioContext = new AudioContext();
@@ -247,21 +276,35 @@ function estimateMonitorOutputLatencyMs(): number | undefined {
 interface ActivePlayback extends PlaybackHandle {
   elements: HTMLVideoElement[];
   gainsByTakeId: Map<string, GainNode>;
-  sources: MediaElementAudioSourceNode[];
+  sourceNodesByTakeId: Map<string, AudioBufferSourceNode>;
   timers: ReturnType<typeof setTimeout>[];
   /** The AudioContext-clock timestamp corresponding to this schedule's startAtMs: 0. */
   videoAnchorTime: number;
 }
 
 /**
- * Real playback adapter: routes every scheduled Take's/Guide's audio
- * through one shared AudioContext graph (a GainNode per entry, fed by a
- * MediaElementAudioSourceNode pulled from that entry's own offscreen
- * <video> element) rather than relying on each element's independent
- * timer and volume, so Takes/Guide stay sample-accurately scheduled
- * against one clock instead of drifting apart during a session (ADR 0002).
- * The <video> elements remain the actual audio+video source — only the
- * volume/mute path and start-time scheduling are graph-driven.
+ * Decodes a Take's/Guide's media into a full `AudioBuffer`, ready for
+ * `AudioBufferSourceNode.start(time)` — sample-accurate scheduling against
+ * the `AudioContext` clock, unlike timing a `<video>` element's `.play()` via
+ * `setTimeout`, whose actual start moment the Web platform gives no
+ * precision guarantee for at all and which varies file to file (see `play()`
+ * below).
+ */
+async function decodeAudioBuffer(mediaRef: string, audioContext: AudioContext): Promise<AudioBuffer> {
+  const response = await fetch(mediaRef);
+  const arrayBuffer = await response.arrayBuffer();
+  return audioContext.decodeAudioData(arrayBuffer);
+}
+
+/**
+ * Real playback adapter: every scheduled Take's/Guide's audio is decoded
+ * into an `AudioBuffer` and started via `AudioBufferSourceNode.start(time)`
+ * against one shared `AudioContext`, so every entry is sample-accurately
+ * scheduled against a single clock (ADR 0002) with no per-file startup
+ * jitter. A muted `<video>` element per entry supplies visual frames for the
+ * grid only — it is not the audio path, and its `setTimeout`-driven start
+ * carries no sync guarantee, which is fine for frames but was the actual
+ * cause of audible cross-Take/Guide drift when it used to also carry audio.
  */
 export class BrowserPlaybackAdapter implements PlaybackAdapter {
   private nextId = 1;
@@ -313,24 +356,50 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
     const referenceTime = audioContext.currentTime;
     const graphSchedule = computeAudioGraphSchedule(schedule, referenceTime);
 
+    // Decoded together, before any node starts: every entry's audio is
+    // ready before scheduling begins, so a slow decode delays every source
+    // by the same shared amount (harmless — relative sync is unaffected)
+    // rather than letting one file's decode time desync it from the rest.
+    // This is what actually fixes cross-Take drift: a `<video>` element's
+    // `.play()` gives no guarantee about when audio truly starts flowing,
+    // and that startup cost varies independently per file. An
+    // `AudioBufferSourceNode` has none of that: once decoded,
+    // `start(time)` is scheduled sample-accurately against this same
+    // `AudioContext` clock by the platform itself.
+    const buffers = await Promise.all(
+      graphSchedule.entries.map((entry) => decodeAudioBuffer(entry.mediaRef, audioContext))
+    );
+
     const elements: HTMLVideoElement[] = [];
     const gainsByTakeId = new Map<string, GainNode>();
-    const sources: MediaElementAudioSourceNode[] = [];
+    const sourceNodesByTakeId = new Map<string, AudioBufferSourceNode>();
     const timers: ReturnType<typeof setTimeout>[] = [];
 
-    for (const entry of graphSchedule.entries) {
-      const video = document.createElement("video");
-      video.src = entry.mediaRef;
-      elements.push(video);
-
+    graphSchedule.entries.forEach((entry, index) => {
       const gain = audioContext.createGain();
       gain.gain.value = entry.muted ? 0 : entry.volume;
       gain.connect(audioContext.destination);
       gainsByTakeId.set(entry.takeId, gain);
 
-      const source = audioContext.createMediaElementSource(video);
+      const source = audioContext.createBufferSource();
+      source.buffer = buffers[index];
       source.connect(gain);
-      sources.push(source);
+      // A start time already in the past (e.g. decode outran a very short
+      // schedule) starts immediately rather than throwing — clamped
+      // explicitly so every entry that needed clamping starts together,
+      // at the same "now", rather than at whatever moment each one
+      // individually reached this line.
+      source.start(Math.max(entry.contextStartTime, audioContext.currentTime));
+      sourceNodesByTakeId.set(entry.takeId, source);
+
+      // The <video> element only supplies visual frames for the grid, muted
+      // so it never doubles the audio. `setTimeout`-driven start is fine
+      // here: eyes tolerate the tens-of-ms slop this can't avoid in a way
+      // ears don't.
+      const video = document.createElement("video");
+      video.src = entry.mediaRef;
+      video.muted = true;
+      elements.push(video);
 
       const delayMs = Math.max(0, (entry.contextStartTime - audioContext.currentTime) * 1000);
       timers.push(
@@ -339,13 +408,13 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
           if (this.active.has(id)) void video.play();
         }, delayMs)
       );
-    }
+    });
 
     const handle: ActivePlayback = {
       id,
       elements,
       gainsByTakeId,
-      sources,
+      sourceNodesByTakeId,
       timers,
       videoAnchorTime: graphSchedule.videoAnchorTime,
     };
@@ -357,7 +426,14 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
     const active = this.active.get(handle.id);
     if (!active) return;
     active.timers.forEach(clearTimeout);
-    active.sources.forEach((source) => source.disconnect());
+    active.sourceNodesByTakeId.forEach((source) => {
+      try {
+        source.stop();
+      } catch {
+        // Already finished/stopped — nothing left to stop.
+      }
+      source.disconnect();
+    });
     active.gainsByTakeId.forEach((gain) => gain.disconnect());
     active.elements.forEach((el) => {
       el.pause();

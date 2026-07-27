@@ -495,7 +495,8 @@ export class RecordingEngine {
       project.guide,
       this.monitorMix,
       track.id,
-      plan.leadInMs
+      plan.leadInMs,
+      this.capture.getLatencyMs?.()
     );
     if (monitorSchedule.entries.length > 0) {
       this.activeMonitorPlaybackHandle = await this.startPlayback("monitor-mix", monitorSchedule);

@@ -363,6 +363,26 @@ describe("RecordingEngine", () => {
       expect(secondTrack.takes[0].offsetMs).toBe(-80);
     });
 
+    it("offsets the Guide in the Monitor Mix by the same latency used to offset a prior Take, so the two share one reference during an overdub", async () => {
+      const leadInEngine = new RecordingEngine(capture, playback, { countIn, ...NO_LEAD_IN });
+      leadInEngine.createProject("My Song", { bpm: 120, beatsPerBar: 4 });
+      leadInEngine.importGuide("guide-media-ref");
+
+      capture.reportedLatencyMs = 40;
+      await leadInEngine.recordTake(undefined);
+      await leadInEngine.stopRecording();
+      const firstTake = leadInEngine.getActiveProject()!.tracks[0].takes[0];
+      expect(firstTake.offsetMs).toBe(-40);
+
+      await leadInEngine.recordTake(undefined);
+
+      const monitorSchedule = playback.playedSchedules.at(-1)!;
+      const takeEntry = monitorSchedule.entries.find((e) => e.takeId === firstTake.id)!;
+      const guideEntry = monitorSchedule.entries.find((e) => e.takeId === "guide")!;
+      // Both share the same reference latency, so they still coincide.
+      expect(guideEntry.startAtMs).toBe(takeEntry.startAtMs);
+    });
+
     it("excludes the Track currently being recorded onto from the Monitor Mix", async () => {
       engine.createProject("My Song");
       await engine.recordTake(undefined);

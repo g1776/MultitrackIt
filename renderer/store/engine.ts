@@ -13,8 +13,14 @@ import type { ProjectStorageAdapter } from "../../src/persistence/types";
 // ever has one RecordingEngine/CaptureAdapter/storage for its lifetime, and
 // zustand stores (which import these directly) need a stable reference that
 // exists before any component mounts.
-export const captureAdapter = new BrowserCaptureAdapter();
 export const playbackAdapter = new BrowserPlaybackAdapter();
+/**
+ * Latency is estimated off the same, real, already-open AudioContext that
+ * actually drives Monitor Mix/Guide playback — not a disposable, disconnected
+ * one — so the estimate reflects what this Take was genuinely monitored
+ * through instead of a noisy, unrelated reading.
+ */
+export const captureAdapter = new BrowserCaptureAdapter(() => playbackAdapter.getAudioContext());
 /** Audio-only real microphone capture, for Mode A's acoustic loopback (#28) — no camera to couple to, unlike `captureAdapter`. */
 export const micCaptureAdapter = new MicCaptureAdapter();
 export const countInAdapter = new BrowserCountInAdapter(() => playbackAdapter.getAudioContext());

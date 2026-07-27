@@ -96,10 +96,11 @@ function isTrackAudible(tracks: Track[], track: Track): boolean {
  * Monitor Mix schedule played while recording a new Take: the selected
  * Takes of previously recorded Tracks, offset-corrected and sync'd, at
  * their Monitor Mix levels, plus the Guide (if any) at its own Monitor Mix
- * level, always starting at offset 0. The Track currently being recorded
- * onto (`recordingTrackId`) is excluded so the performer only hears prior
- * parts. The Guide is included here even though it's excluded from
- * composite playback, since Monitor Mix is recording-only.
+ * level, offset by `monitorLatencyMs` the same way a prior Take's own
+ * capture latency offsets it (see below). The Track currently being
+ * recorded onto (`recordingTrackId`) is excluded so the performer only
+ * hears prior parts. The Guide is included here even though it's excluded
+ * from composite playback, since Monitor Mix is recording-only.
  *
  * `leadInMs` places the Project timeline's zero point — where the Guide's
  * first beat and every prior Take with Offset 0 sit — at capture start
@@ -115,13 +116,26 @@ function isTrackAudible(tracks: Track[], track: Track): boolean {
  * pushing t=0 past capture start. Normalization still catches an Offset
  * negative enough to precede the lead-in itself (only reachable by a
  * user-entered one), for which no earlier start exists to give.
+ *
+ * `monitorLatencyMs`, when given, is applied to the Guide's Offset the same
+ * way a Take's own capture latency is applied to its Offset (negated, so a
+ * late-arriving signal starts earlier to compensate). Without this, the
+ * Guide always sits at Offset 0 while every prior Take carries whatever
+ * latency was estimated for it, so overdubbing against the Guide and
+ * overdubbing against a prior Take are two different references that
+ * disagree by that estimate — even when the estimate itself is accurate.
+ * Passing the same estimate used for the Take about to be recorded (i.e. the
+ * latency measured for the most recently stopped capture) keeps the Guide
+ * and every prior Take at one shared reference within this Monitor Mix,
+ * regardless of the estimate's absolute accuracy.
  */
 export function buildMonitorMixSchedule(
   tracks: Track[],
   guide: Guide | null,
   monitorMixLevels: Map<TrackId | "guide", number>,
   recordingTrackId: TrackId | undefined,
-  leadInMs = 0
+  leadInMs = 0,
+  monitorLatencyMs?: number
 ): PlaybackSchedule {
   const otherTracks = recordingTrackId
     ? tracks.filter((t) => t.id !== recordingTrackId)
@@ -131,7 +145,7 @@ export function buildMonitorMixSchedule(
     inputs.push({
       takeId: "guide",
       mediaRef: guide.mediaRef,
-      offsetMs: 0,
+      offsetMs: monitorLatencyMs ? -monitorLatencyMs : 0,
       volume: monitorMixLevels.get("guide") ?? 1,
       muted: false,
     });
