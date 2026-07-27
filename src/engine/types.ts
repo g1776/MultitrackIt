@@ -1,3 +1,5 @@
+import type { MetronomeClick } from "./metronome";
+
 export type TrackId = string;
 export type TakeId = string;
 
@@ -26,6 +28,15 @@ export interface Guide {
   includeInMonitorMix: boolean;
   /** Whether the Guide is included in composite playback and exported Mixdowns. */
   includeInMixdown: boolean;
+  /**
+   * The click schedule this Guide's audio was rendered from, present only
+   * when the Guide is a generated Metronome (absent for an imported Guide,
+   * which carries no schedule the engine computed). A reader that needs
+   * "where the beats fall" — e.g. diagnostics analysis — reads it from here
+   * rather than recomputing it separately, so it can never disagree with
+   * what was actually scheduled and played.
+   */
+  metronomeSchedule?: MetronomeClick[];
 }
 
 export interface Project {

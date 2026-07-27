@@ -1,6 +1,7 @@
 import { RecordingEngine } from "../../src/engine/RecordingEngine";
 import { BrowserCaptureAdapter, BrowserPlaybackAdapter } from "../../src/adapters/browserAdapters";
 import { BrowserCountInAdapter } from "../../src/adapters/countInAudio";
+import { generateMetronomeGuideAudio } from "../../src/adapters/metronomeAudio";
 import { ElectronProjectStorageAdapter } from "../../src/adapters/electronStorageAdapter";
 import { ElectronDiagnosticsStorageAdapter } from "../../src/adapters/electronDiagnosticsStorageAdapter";
 import { EngineEventLog } from "../../src/diagnostics/eventLog";
@@ -28,6 +29,7 @@ export const engineEventLog = new EngineEventLog(
 export const engine = new RecordingEngine(captureAdapter, playbackAdapter, {
   countIn: countInAdapter,
   events: engineEventLog,
+  metronomeAudio: generateMetronomeGuideAudio,
 });
 export const storage: ProjectStorageAdapter = new ElectronProjectStorageAdapter();
 export const diagnosticsStorage: DiagnosticsStorageAdapter =

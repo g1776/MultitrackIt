@@ -7,7 +7,13 @@ import {
   RecordingEngine,
 } from "./RecordingEngine";
 import { computeCountIn } from "./countIn";
-import { FakeCaptureAdapter, FakeCountInAdapter, FakePlaybackAdapter } from "./fakeAdapters";
+import { computeMetronomeClicks } from "./metronome";
+import {
+  FakeCaptureAdapter,
+  FakeCountInAdapter,
+  FakePlaybackAdapter,
+  fakeMetronomeAudio,
+} from "./fakeAdapters";
 
 /**
  * Options giving a recording no padding and no counted bars, so it starts
@@ -765,6 +771,67 @@ describe("RecordingEngine", () => {
 
     it("throws when importing a Guide with no active Project", () => {
       expect(() => engine.importGuide("guide-media-ref")).toThrow();
+    });
+  });
+
+  describe("generateMetronomeGuide", () => {
+    it("renders Metronome audio at the Project's own tempo/time signature and imports it as the Guide", () => {
+      const metronomeEngine = new RecordingEngine(capture, playback, {
+        countIn,
+        ...NO_LEAD_IN,
+        metronomeAudio: fakeMetronomeAudio,
+      });
+      metronomeEngine.createProject("My Song", { bpm: 120, beatsPerBar: 3 });
+
+      const guide = metronomeEngine.generateMetronomeGuide({ durationMs: 1000 });
+
+      expect(guide.mediaRef).toBe("metronome-120-3-1000");
+      expect(guide.includeInMonitorMix).toBe(true);
+      expect(guide.includeInMixdown).toBe(false);
+      expect(metronomeEngine.getActiveProject()!.guide).toBe(guide);
+    });
+
+    it("attaches the rendered click schedule to the Guide, matching computeMetronomeClicks for the same params", () => {
+      const metronomeEngine = new RecordingEngine(capture, playback, {
+        countIn,
+        ...NO_LEAD_IN,
+        metronomeAudio: fakeMetronomeAudio,
+      });
+      metronomeEngine.createProject("My Song", { bpm: 100, beatsPerBar: 4 });
+
+      const guide = metronomeEngine.generateMetronomeGuide({ durationMs: 2000 });
+
+      expect(guide.metronomeSchedule).toEqual(
+        computeMetronomeClicks({ bpm: 100, beatsPerBar: 4, durationMs: 2000 })
+      );
+    });
+
+    it("replaces a previously imported or generated Guide", () => {
+      const metronomeEngine = new RecordingEngine(capture, playback, {
+        countIn,
+        ...NO_LEAD_IN,
+        metronomeAudio: fakeMetronomeAudio,
+      });
+      metronomeEngine.createProject("My Song");
+      metronomeEngine.importGuide("imported-guide");
+
+      metronomeEngine.generateMetronomeGuide({ durationMs: 1000 });
+
+      expect(metronomeEngine.getActiveProject()!.guide?.mediaRef).not.toBe("imported-guide");
+    });
+
+    it("throws when generating a Metronome Guide with no active Project", () => {
+      const metronomeEngine = new RecordingEngine(capture, playback, {
+        countIn,
+        ...NO_LEAD_IN,
+        metronomeAudio: fakeMetronomeAudio,
+      });
+      expect(() => metronomeEngine.generateMetronomeGuide({ durationMs: 1000 })).toThrow();
+    });
+
+    it("throws when no metronome audio source was configured", () => {
+      engine.createProject("My Song");
+      expect(() => engine.generateMetronomeGuide({ durationMs: 1000 })).toThrow();
     });
   });
 

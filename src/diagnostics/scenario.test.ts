@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { FakeCountInAdapter, FakePlaybackAdapter } from "../engine/fakeAdapters";
+import { FakeCountInAdapter, FakePlaybackAdapter, fakeMetronomeAudio } from "../engine/fakeAdapters";
 import { createFakeEventSink } from "./fakeEventSink";
 import {
   analyseScenarioResult,
@@ -20,6 +20,7 @@ function run(overrides: Partial<RunSyntheticScenarioOptions> = {}) {
   return runSyntheticScenario({
     playback: new FakePlaybackAdapter(),
     countIn: new FakeCountInAdapter(),
+    metronomeAudio: fakeMetronomeAudio,
     ...FAST,
     ...overrides,
   });
@@ -31,6 +32,14 @@ describe("runSyntheticScenario", () => {
     expect(project.tempoBpm).toBe(DEFAULT_SCENARIO_PARAMS.tempoBpm);
     expect(project.beatsPerBar).toBe(DEFAULT_SCENARIO_PARAMS.beatsPerBar);
     expect(params).toEqual(DEFAULT_SCENARIO_PARAMS);
+  });
+
+  it("gives the ephemeral Project a real Metronome Guide, audible in Monitor Mix, matching its own tempo", async () => {
+    const { project } = await run({ params: { tempoBpm: 120, beatsPerBar: 3 } });
+    expect(project.guide).not.toBeNull();
+    expect(project.guide!.includeInMonitorMix).toBe(true);
+    expect(project.guide!.metronomeSchedule).toBeDefined();
+    expect(project.guide!.metronomeSchedule![0]).toEqual({ atMs: 0, accent: true });
   });
 
   it("records the default 3 Tracks of one Take each", async () => {

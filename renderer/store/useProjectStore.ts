@@ -21,6 +21,7 @@ interface ProjectState {
   renameTrack: (trackId: string, name: string) => void;
   selectTake: (trackId: string, takeId: string) => void;
   importGuide: (mediaRef: string) => void;
+  generateMetronomeGuide: (durationMs: number) => void;
   setGuideIncludeInMonitorMix: (include: boolean) => void;
   setGuideIncludeInMixdown: (include: boolean) => void;
   setMonitorMixLevel: (targetId: string, level: number) => void;
@@ -124,6 +125,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectTake: (trackId, takeId) => guarded(set, () => engine.selectTake(trackId, takeId)),
 
   importGuide: (mediaRef) => guarded(set, () => engine.importGuide(mediaRef)),
+
+  generateMetronomeGuide: (durationMs) =>
+    guarded(set, () => engine.generateMetronomeGuide({ durationMs })),
 
   setGuideIncludeInMonitorMix: (include) =>
     guarded(set, () => engine.setGuideIncludeInMonitorMix(include)),

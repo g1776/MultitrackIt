@@ -14,6 +14,7 @@ import type {
 import type { EngineStatus, Guide, Project, Take, TakeId, Track, TrackId } from "./types";
 import { buildCompositeSchedule, buildMixUpdates, buildMonitorMixSchedule } from "./scheduling";
 import { computeCountIn, type CountInPlan } from "./countIn";
+import { computeMetronomeClicks, type MetronomeParams } from "./metronome";
 import type { ProjectSnapshot } from "../persistence/types";
 
 let idCounter = 0;
@@ -55,6 +56,19 @@ const SILENT_COUNT_IN: CountInAdapter = {
   cancel: () => {},
 };
 
+/**
+ * Renders a Metronome's audio from its tempo/time-signature/duration,
+ * returning an opaque mediaRef — the browser-specific synthesis step
+ * (`generateMetronomeGuideAudio`) injected here rather than imported
+ * directly, so the engine still depends only on adapter seams, never
+ * Electron/browser AV APIs (matching `CaptureAdapter`/`PlaybackAdapter`).
+ */
+export type MetronomeAudioSource = (params: MetronomeParams) => string;
+
+const NO_METRONOME_AUDIO: MetronomeAudioSource = () => {
+  throw new Error("No metronome audio source configured");
+};
+
 export interface RecordingEngineOptions {
   /** Dedicated Count-in click source. Defaults to a silent one. */
   countIn?: CountInAdapter;
@@ -70,6 +84,12 @@ export interface RecordingEngineOptions {
    * whether one is present.
    */
   events?: EngineEventSink;
+  /**
+   * Metronome audio synthesis, used by `generateMetronomeGuide`. Absent by
+   * default — only a caller that actually generates Metronome Guides needs
+   * to supply one; calling `generateMetronomeGuide` without one throws.
+   */
+  metronomeAudio?: MetronomeAudioSource;
 }
 
 /** Tempo a new Project starts at, and the fallback for snapshots saved before Projects owned a tempo. */
@@ -106,6 +126,7 @@ export class RecordingEngine {
   private readonly countInPaddingMs: number;
   private readonly idleReleaseMs: number;
   private readonly events: EngineEventSink | undefined;
+  private readonly metronomeAudio: MetronomeAudioSource;
 
   constructor(
     private readonly capture: CaptureAdapter,
@@ -117,6 +138,7 @@ export class RecordingEngine {
     this.countInPaddingMs = options.countInPaddingMs ?? DEFAULT_COUNT_IN_PADDING_MS;
     this.idleReleaseMs = options.idleReleaseMs ?? DEFAULT_IDLE_RELEASE_MS;
     this.events = options.events;
+    this.metronomeAudio = options.metronomeAudio ?? NO_METRONOME_AUDIO;
   }
 
   /**
@@ -185,6 +207,30 @@ export class RecordingEngine {
     const project = this.requireProject();
     const guide: Guide = { mediaRef, includeInMonitorMix: true, includeInMixdown: false };
     project.guide = guide;
+    return guide;
+  }
+
+  /**
+   * Generates a Metronome — a click track at the Project's own tempo and
+   * time signature — and imports it as the Project's Guide, replacing any
+   * existing one, exactly as `importGuide` does (audible in Monitor Mix by
+   * default, excluded from Mixdown by default). The tempo/time signature are
+   * read from the Project rather than passed in: they are fixed for a
+   * Project's lifetime (see `createProject`), so a Metronome generated from
+   * them can never disagree with what Takes were actually recorded against.
+   * The click schedule it was rendered from is attached to the returned
+   * Guide as `metronomeSchedule`.
+   */
+  generateMetronomeGuide(params: { durationMs: number }): Guide {
+    const project = this.requireProject();
+    const metronomeParams: MetronomeParams = {
+      bpm: project.tempoBpm,
+      beatsPerBar: project.beatsPerBar,
+      durationMs: params.durationMs,
+    };
+    const mediaRef = this.metronomeAudio(metronomeParams);
+    const guide = this.importGuide(mediaRef);
+    guide.metronomeSchedule = computeMetronomeClicks(metronomeParams);
     return guide;
   }
 

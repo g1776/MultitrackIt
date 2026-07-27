@@ -1,11 +1,10 @@
 import type { CountInAdapter, PlaybackAdapter } from "../engine/adapters";
 import type { EngineEventSink } from "../engine/events";
-import { RecordingEngine } from "../engine/RecordingEngine";
+import { RecordingEngine, type MetronomeAudioSource } from "../engine/RecordingEngine";
 import type { Project } from "../engine/types";
 import { SyntheticCaptureAdapter } from "../adapters/syntheticCaptureAdapter";
 import { decodeMediaRef } from "../adapters/audioDecode";
 import { analyseScenario, type DecodedTrack } from "./analysis";
-import { computeSyntheticBeatGrid } from "./syntheticSignal";
 import type { AnalysisResult } from "./types";
 
 export interface ScenarioParams {
@@ -59,6 +58,8 @@ export interface ScenarioProgress {
 export interface RunSyntheticScenarioOptions {
   /** Real playback adapter — playback stays entirely real throughout a synthetic run (ADR 0004). */
   playback: PlaybackAdapter;
+  /** Metronome audio synthesis, used to generate the ephemeral Project's Guide. */
+  metronomeAudio: MetronomeAudioSource;
   countIn?: CountInAdapter;
   events?: EngineEventSink;
   params?: Partial<ScenarioParams>;
@@ -131,6 +132,7 @@ export async function runSyntheticScenario(
     countInBars: options.countInBars,
     countInPaddingMs: options.countInPaddingMs,
     idleReleaseMs: options.idleReleaseMs,
+    metronomeAudio: options.metronomeAudio,
   });
 
   engine.createProject("Synthetic sync scenario", {
@@ -140,6 +142,11 @@ export async function runSyntheticScenario(
 
   const beatIntervalMs = 60000 / params.tempoBpm;
   const performanceMs = params.beatCount * beatIntervalMs;
+
+  // A real Guide from the first Take onward (ADR 0006), long enough to cover
+  // the whole performance so it plays through to the end of every Take
+  // rather than falling silent partway through.
+  engine.generateMetronomeGuide({ durationMs: performanceMs });
 
   for (let trackIndex = 0; trackIndex < params.trackCount; trackIndex++) {
     options.onProgress?.({ trackIndex, trackCount: params.trackCount });
@@ -179,11 +186,13 @@ export async function analyseScenarioResult(
     })
   );
 
-  const expectedBeatTimesMs = computeSyntheticBeatGrid({
-    bpm: result.params.tempoBpm,
-    beatsPerBar: result.params.beatsPerBar,
-    beatCount: result.params.beatCount,
-  }).map((click) => click.atMs);
+  // Sourced from the real Guide's own schedule rather than computed
+  // independently (ADR 0006): the Guide is what was actually scheduled and
+  // played, so this can never disagree with it. `runSyntheticScenario`
+  // always generates a Metronome Guide before recording, so this is present.
+  const schedule = result.project.guide?.metronomeSchedule;
+  if (!schedule) throw new Error("Scenario Project has no Metronome Guide schedule to analyse against");
+  const expectedBeatTimesMs = schedule.slice(0, result.params.beatCount).map((click) => click.atMs);
 
   return analyseScenario(decodedTracks, expectedBeatTimesMs, result.params.simulatedLatencyMs);
 }

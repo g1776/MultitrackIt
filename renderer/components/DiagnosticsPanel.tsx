@@ -13,6 +13,7 @@ import {
   summariseProject,
 } from "../../src/diagnostics/report";
 import { EngineEventLog } from "../../src/diagnostics/eventLog";
+import { generateMetronomeGuideAudio } from "../../src/adapters/metronomeAudio";
 import {
   analyseScenarioResult,
   DEFAULT_SCENARIO_PARAMS,
@@ -115,6 +116,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
       const result = await runSyntheticScenario({
         playback: playbackAdapter,
         countIn: countInAdapter,
+        metronomeAudio: generateMetronomeGuideAudio,
         events: scenarioEvents,
         params: scenarioParams,
         onProgress: setScenarioProgress,

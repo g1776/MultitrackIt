@@ -7,7 +7,8 @@ import type {
   PlaybackMixUpdate,
   PlaybackSchedule,
 } from "./adapters";
-import type { MetronomeClick } from "./metronome";
+import type { MetronomeClick, MetronomeParams } from "./metronome";
+import type { MetronomeAudioSource } from "./RecordingEngine";
 
 /**
  * In-memory capture adapter for tests: no real AV I/O. Models arming as its
@@ -103,3 +104,11 @@ export class FakePlaybackAdapter implements PlaybackAdapter {
     this.mixUpdates.push({ handle, updates });
   }
 }
+
+/**
+ * In-memory Metronome audio source for tests: no real WAV synthesis, just a
+ * mediaRef that encodes the params it was called with, so a test can assert
+ * a particular tempo/duration produced it without decoding audio.
+ */
+export const fakeMetronomeAudio: MetronomeAudioSource = (params: MetronomeParams) =>
+  `metronome-${params.bpm}-${params.beatsPerBar}-${params.durationMs}`;

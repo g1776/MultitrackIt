@@ -1,5 +1,4 @@
 import { useProjectStore } from "../store/useProjectStore";
-import { generateMetronomeGuideAudio } from "../../src/adapters/metronomeAudio";
 import { MonitorMixVolumeSlider } from "./controls/MonitorMixVolumeSlider";
 
 // Fixed rather than user-configurable: long enough to cover most songs, and
@@ -10,9 +9,9 @@ const METRONOME_GUIDE_DURATION_MS = 5 * 60 * 1000;
 export function GuideSection() {
   const guide = useProjectStore((s) => s.project?.guide ?? null);
   const tempoBpm = useProjectStore((s) => s.project?.tempoBpm);
-  const beatsPerBar = useProjectStore((s) => s.project?.beatsPerBar);
   const monitorMixLevels = useProjectStore((s) => s.monitorMixLevels);
   const importGuide = useProjectStore((s) => s.importGuide);
+  const generateMetronomeGuide = useProjectStore((s) => s.generateMetronomeGuide);
   const setGuideIncludeInMonitorMix = useProjectStore((s) => s.setGuideIncludeInMonitorMix);
   const setGuideIncludeInMixdown = useProjectStore((s) => s.setGuideIncludeInMixdown);
   const setMonitorMixLevel = useProjectStore((s) => s.setMonitorMixLevel);
@@ -20,13 +19,7 @@ export function GuideSection() {
   // Generated at the Project's own tempo and time signature — the Project is
   // the single source of truth for both (see `TempoControls`).
   function handleGenerateMetronomeGuide() {
-    if (tempoBpm === undefined || beatsPerBar === undefined) return;
-    const mediaRef = generateMetronomeGuideAudio({
-      bpm: tempoBpm,
-      beatsPerBar,
-      durationMs: METRONOME_GUIDE_DURATION_MS,
-    });
-    importGuide(mediaRef);
+    generateMetronomeGuide(METRONOME_GUIDE_DURATION_MS);
   }
 
   return (
