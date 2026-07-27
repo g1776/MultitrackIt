@@ -55,8 +55,15 @@ export interface CountInAdapter {
    * Starts the given clicks playing now, resolving once they are scheduled
    * rather than once they have all sounded — the engine, not the adapter,
    * owns when the Count-in ends and capture begins.
+   *
+   * `startDelayMs`, when given, is milliseconds from now the *first* click
+   * (`atMs: 0`) should sound, with every other click's `atMs` still relative
+   * to that same moment — used to anchor the Count-in to the same instant
+   * the Monitor Mix/Guide playback already started against (see
+   * `PlaybackAdapter.getScheduledStartDelayMs`), rather than the Count-in
+   * picking its own "now" after whatever imprecise wait preceded this call.
    */
-  playCountIn(clicks: MetronomeClick[]): Promise<void>;
+  playCountIn(clicks: MetronomeClick[], startDelayMs?: number): Promise<void>;
   /** Stops any clicks still pending, e.g. if a recording is abandoned mid-Count-in. */
   cancel(): void;
 }
@@ -85,6 +92,18 @@ export interface PlaybackAdapter {
    * on the next `play()`.
    */
   updateMix(handle: PlaybackHandle, updates: PlaybackMixUpdate[]): void;
+  /**
+   * Milliseconds from now a moment at `startAtMs` (same offset-normalized
+   * units as a `PlaybackSchedule` entry) should occur, to land in sync with
+   * this handle's already-scheduled audio graph — the one clock reference
+   * every other caller anchors against instead of re-deriving its own
+   * (originally built for the video grid; the Count-in uses it too, so its
+   * clicks share the same anchor the Guide/Monitor Mix already committed to
+   * rather than reading a fresh, possibly-drifted "now"). Undefined if
+   * `handle` isn't (or is no longer) active, or if this adapter has no
+   * shared clock to anchor against (e.g. a test fake).
+   */
+  getScheduledStartDelayMs?(handle: PlaybackHandle, startAtMs: number): number | undefined;
 }
 
 export interface PlaybackMixUpdate {

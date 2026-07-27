@@ -73,10 +73,12 @@ export class FakeCaptureAdapter implements CaptureAdapter {
 /** In-memory Count-in click source for tests: records the clicks it was asked to sound. */
 export class FakeCountInAdapter implements CountInAdapter {
   public playedCountIns: MetronomeClick[][] = [];
+  public playedStartDelaysMs: number[] = [];
   public cancelCount = 0;
 
-  async playCountIn(clicks: MetronomeClick[]): Promise<void> {
+  async playCountIn(clicks: MetronomeClick[], startDelayMs = 0): Promise<void> {
     this.playedCountIns.push(clicks);
+    this.playedStartDelaysMs.push(startDelayMs);
   }
 
   cancel(): void {

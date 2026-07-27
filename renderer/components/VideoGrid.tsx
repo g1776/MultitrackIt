@@ -69,7 +69,7 @@ export function VideoGrid({ tracks }: { tracks: Track[] }) {
       .filter((cell) => cell.trackId !== recordingTrackId)
       .map((cell) => {
         const video = gridVideoRefs.current.get(cell.trackId);
-        const delayMs = playbackAdapter.getSyncedStartDelayMs(handle, cell.startAtMs);
+        const delayMs = playbackAdapter.getScheduledStartDelayMs(handle, cell.startAtMs);
         if (!video || delayMs === undefined) return undefined;
         return setTimeout(() => void video.play(), delayMs);
       });

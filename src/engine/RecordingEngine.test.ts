@@ -482,7 +482,7 @@ describe("RecordingEngine", () => {
       expect(observed).toEqual(["getting-ready", "counting-in", "recording"]);
     });
 
-    it("stays silent during the padding, sounding no click until the Count-in begins", async () => {
+    it("schedules the Count-in to sound only once the padding ends, anchored to the same instant as the Monitor Mix", async () => {
       vi.useFakeTimers();
       try {
         const timedEngine = new RecordingEngine(capture, playback, {
@@ -492,13 +492,18 @@ describe("RecordingEngine", () => {
         timedEngine.createProject("My Song", { bpm: 120, beatsPerBar: 4 });
 
         const recordPromise = timedEngine.recordTake(undefined);
+        // Scheduled immediately, alongside the Monitor Mix, rather than after
+        // waiting out the padding — so its clock reference can't inherit that
+        // wait's own drift. It still shouldn't *sound* until the padding ends.
+        await vi.advanceTimersByTimeAsync(0);
+        expect(countIn.playedCountIns).toHaveLength(1);
+        expect(countIn.playedStartDelaysMs[0]).toBe(1000);
+
         await vi.advanceTimersByTimeAsync(999);
         expect(timedEngine.getStatus()).toBe("getting-ready");
-        expect(countIn.playedCountIns).toHaveLength(0);
 
         await vi.advanceTimersByTimeAsync(1);
         expect(timedEngine.getStatus()).toBe("counting-in");
-        expect(countIn.playedCountIns).toHaveLength(1);
         expect(capture.startedHandles).toHaveLength(0);
 
         await vi.advanceTimersByTimeAsync(2000);
@@ -520,10 +525,10 @@ describe("RecordingEngine", () => {
         timedEngine.createProject("My Song", { bpm: 40, beatsPerBar: 4 });
 
         const recordPromise = timedEngine.recordTake(undefined);
-        await vi.advanceTimersByTimeAsync(999);
-        expect(countIn.playedCountIns).toHaveLength(0);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(countIn.playedStartDelaysMs[0]).toBe(1000);
 
-        await vi.advanceTimersByTimeAsync(1 + 6000);
+        await vi.advanceTimersByTimeAsync(999 + 1 + 6000);
         await recordPromise;
         expect(capture.startedHandles).toHaveLength(1);
       } finally {

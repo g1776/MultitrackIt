@@ -504,9 +504,23 @@ export class RecordingEngine {
       this.recordSchedule("monitor-mix", monitorSchedule);
     }
 
-    // Get ready (silent), then count in (audible), then capture. The clicks
-    // come from their own source, never from the Guide, which has not begun
-    // sounding yet at this point.
+    // Scheduled now, up front, rather than after waiting out the padding:
+    // the Guide (if any) was just scheduled against `videoAnchorTime` at
+    // this same instant, so anchoring the Count-in's first click to that
+    // same instant (via getScheduledStartDelayMs) keeps both on the one
+    // clock the playback adapter owns. Reading a fresh "now" only after an
+    // imprecise setTimeout-based wait — what this used to do — let that
+    // wait's own drift land between the Count-in's clicks and the Guide's
+    // first beat, which is exactly the "starting early/late" mismatch this
+    // avoids. The clicks still come from their own source, never the Guide.
+    if (plan.clicks.length > 0) {
+      const startDelayMs =
+        this.activeMonitorPlaybackHandle &&
+        this.playback.getScheduledStartDelayMs?.(this.activeMonitorPlaybackHandle, plan.paddingMs);
+      void this.countIn.playCountIn(plan.clicks, startDelayMs ?? plan.paddingMs);
+    }
+
+    // Get ready (silent), then count in (audible), then capture.
     this.setStatus("getting-ready");
     this.events?.record({ type: "padding-started", requestedDurationMs: plan.paddingMs });
     await this.wait(plan.paddingMs);
@@ -519,7 +533,6 @@ export class RecordingEngine {
       beats: plan.clicks.length,
       bars: this.countInBars,
     });
-    if (plan.clicks.length > 0) await this.countIn.playCountIn(plan.clicks);
     await this.wait(plan.countInMs);
     this.events?.record({ type: "count-in-ended" });
 

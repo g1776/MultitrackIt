@@ -297,6 +297,35 @@ async function decodeAudioBuffer(mediaRef: string, audioContext: AudioContext): 
 }
 
 /**
+ * A decoded buffer takes real, non-negligible time to fetch+decode — time
+ * that elapses *after* `play()` has already committed to a reference instant
+ * (`referenceTime`/`videoAnchorTime`) every entry's `contextStartTime` is
+ * fixed relative to. Longer media (e.g. a Guide covering more bars, or a
+ * slower tempo stretching the same bar count over more real seconds) takes
+ * longer to decode, and once decode outlasts the gap before a schedule's
+ * own `contextStartTime`, `source.start()` clamps to "now" instead of the
+ * intended instant — the entry starts audibly late/early relative to
+ * everything else already anchored to that reference (the Count-in, the
+ * video grid, other already-decoded entries), which is what actually
+ * sounded like a dropped or early first beat. The Guide and every
+ * previously-recorded Take's media are replayed on every subsequent
+ * recordTake()/composite playback in a session, so caching each decode by
+ * `mediaRef` makes every replay after the first a synchronous cache hit —
+ * no decode time left to eat into the schedule at all.
+ */
+const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
+
+function getCachedAudioBuffer(mediaRef: string, audioContext: AudioContext): Promise<AudioBuffer> {
+  let cached = audioBufferCache.get(mediaRef);
+  if (!cached) {
+    cached = decodeAudioBuffer(mediaRef, audioContext);
+    audioBufferCache.set(mediaRef, cached);
+    cached.catch(() => audioBufferCache.delete(mediaRef));
+  }
+  return cached;
+}
+
+/**
  * Real playback adapter: every scheduled Take's/Guide's audio is decoded
  * into an `AudioBuffer` and started via `AudioBufferSourceNode.start(time)`
  * against one shared `AudioContext`, so every entry is sample-accurately
@@ -338,7 +367,7 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
    * caller may be the diagnostics event sink rather than playback, which is
    * why the session is minted here and not in play().
    *
-   * Not part of the PlaybackAdapter seam, mirroring getSyncedStartDelayMs().
+   * Not part of the PlaybackAdapter seam.
    */
   getAudioClockSession(): AudioClockSession | undefined {
     return this.audioClockSession;
@@ -367,7 +396,7 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
     // `start(time)` is scheduled sample-accurately against this same
     // `AudioContext` clock by the platform itself.
     const buffers = await Promise.all(
-      graphSchedule.entries.map((entry) => decodeAudioBuffer(entry.mediaRef, audioContext))
+      graphSchedule.entries.map((entry) => getCachedAudioBuffer(entry.mediaRef, audioContext))
     );
 
     const elements: HTMLVideoElement[] = [];
@@ -453,17 +482,16 @@ export class BrowserPlaybackAdapter implements PlaybackAdapter {
   }
 
   /**
-   * Milliseconds from now a cell starting at `startAtMs` (same
-   * offset-normalized units as a `PlaybackSchedule` entry) should start, to
-   * stay in sync with this handle's audio graph — for a caller that
-   * renders its own separate <video> elements (e.g. the video grid). Undoes
-   * the arithmetic here rather than in the caller, so the AudioContext
-   * clock read/scheduling math stays with the adapter that owns the clock.
-   * Not part of the PlaybackAdapter seam — UI-only, mirroring
-   * getActiveStream() on BrowserCaptureAdapter. Returns undefined if
-   * `handle` isn't (or is no longer) active.
+   * Milliseconds from now a moment at `startAtMs` (same offset-normalized
+   * units as a `PlaybackSchedule` entry) should occur, to stay in sync with
+   * this handle's audio graph. Undoes the arithmetic here rather than in
+   * the caller, so the AudioContext clock read/scheduling math stays with
+   * the adapter that owns the clock. Used both by the video grid (to start
+   * its own <video> elements in sync) and by the engine (to anchor the
+   * Count-in to the same instant the Monitor Mix/Guide already started
+   * against). Returns undefined if `handle` isn't (or is no longer) active.
    */
-  getSyncedStartDelayMs(handle: PlaybackHandle, startAtMs: number): number | undefined {
+  getScheduledStartDelayMs(handle: PlaybackHandle, startAtMs: number): number | undefined {
     const active = this.active.get(handle.id);
     if (!active || !this.audioContext) return undefined;
     const startTime = active.videoAnchorTime + startAtMs / 1000;

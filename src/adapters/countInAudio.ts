@@ -18,14 +18,17 @@ export class BrowserCountInAdapter implements CountInAdapter {
 
   constructor(private readonly getAudioContext: () => AudioContext) {}
 
-  async playCountIn(clicks: MetronomeClick[]): Promise<void> {
+  async playCountIn(clicks: MetronomeClick[], startDelayMs = 0): Promise<void> {
     const audioContext = this.getAudioContext();
     if (audioContext.state === "suspended") await audioContext.resume();
 
     // One reference instant for the whole Count-in, read once: every beat is
     // scheduled off it, so beat spacing can't inherit the jitter of reading
-    // the clock per beat.
-    const startTime = audioContext.currentTime;
+    // the clock per beat. `startDelayMs` shifts that instant forward to the
+    // same moment the Monitor Mix/Guide already started against (see
+    // `PlaybackAdapter.getScheduledStartDelayMs`), rather than this always
+    // being "right now" regardless of when the caller actually invoked it.
+    const startTime = audioContext.currentTime + startDelayMs / 1000;
     this.scheduled = clicks.map((click) => {
       const at = startTime + click.atMs / 1000;
       const oscillator = audioContext.createOscillator();
