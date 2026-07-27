@@ -1,15 +1,47 @@
 # Testing sync
 
 How to conduct a sync test with the Diagnostics panel and how to read the
-report it writes. See ADR 0004 (why the harness exists and how it's built)
-and ADR 0005 (arming, and the capture-acquisition defect this harness found).
+report it writes. See ADR 0004 (why the harness exists and how it's built),
+ADR 0005 (arming, and the capture-acquisition defect this harness found),
+and ADR 0006 (the standalone one-click suite and Metronome-based Guide
+described below).
 
 ## Opening the panel
 
 The Diagnostics panel opens from the toolbar and is separate from the normal
-recording UI. It offers a manual **Write Report** action plus two scripted
-modes: **Synthetic Sync Scenario** (Mode B) and **Acoustic Loopback**
-(Mode A).
+recording UI. It does not require a Project to be open — it spins up its own
+ephemeral Project and Metronome (a generated Guide; see "The diagnostics
+Guide is always a Metronome" below).
+
+## Run Full Diagnostics — the one-click path
+
+**Run Full Diagnostics** is the primary action. One click runs, in order:
+
+1. **Calibration** — a Synthetic Sync Scenario pass at a known nonzero
+   simulated latency, checked against that injected value.
+2. **Synthetic Sync Scenario** (Mode B) — the real, zero-injected-latency
+   measurement, only run if calibration passed.
+3. **Acoustic Loopback** (Mode A) — only run if Mode B ran, per the
+   Mode-B-before-Mode-A reasoning below.
+
+All three phases write into **one report file** per suite run — there is no
+longer a separate file per phase to correlate by `sessionId` or timestamp.
+
+**If calibration fails, the suite aborts before Mode B or Mode A run.** No
+report is written that could be mistaken for a real measurement. This is
+enforced by the suite now, not left as reader discipline — see "Calibrate
+before you trust a clean result" below for why the check exists.
+
+## Advanced: running phases manually
+
+The individual phases — Write Report, Synthetic Sync Scenario alone,
+Acoustic Loopback alone, and the scenario config fields (Track count,
+tempo, beats per bar, beat count, simulated latency) that Run Full
+Diagnostics fixes to sensible defaults — remain available behind an
+Advanced disclosure, for debugging the harness itself (e.g. iterating on
+the onset detector without paying for a full suite run each time). Running
+phases manually does **not** get the calibration gate for free — the
+discipline below still applies by hand in that mode.
 
 ## Run Mode B before Mode A, always
 
@@ -18,17 +50,32 @@ no human performs, and playback stays entirely real. It is the fixed
 reference: it's how you know the *engine* is scheduling correctly, isolated
 from a human performer, a microphone, or room acoustics.
 
-Mode A plays the synthetic click through your speakers and records it back
+Mode A plays the Metronome through your speakers and records it back
 through the microphone, producing a true round-trip latency figure. That
 number only means something once you already trust the engine — otherwise
 you can't tell whether a bad reading is the engine or the round trip through
 air. Run Mode B first and get a clean result before treating a Mode A
-reading as meaningful.
+reading as meaningful. Run Full Diagnostics enforces this order
+automatically; running phases manually in the Advanced area does not.
 
 **Mode A requires speakers, not headphones.** Over headphones, or with
 speakers muted, the microphone never picks up the click and the panel
 reports "No onsets detected — likely headphones instead of speakers, or
 speakers muted" rather than a spurious number.
+
+## The diagnostics Guide is always a Metronome
+
+Both modes capture against one Metronome — a generated Guide, not an
+imported one — created once per suite run and shared by Mode B and Mode A
+alike, rather than each mode computing its own independent expected-beat-time
+math. A Metronome has a single constant tempo and time signature for its
+whole duration; mid-Guide tempo or meter changes are not supported.
+
+This means diagnostics **never** exercises an imported Guide, regardless of
+anything generated or imported in the main app's Project — "Generate Guide"
+or an import there has no bearing on a diagnostics run. There is no path
+today to diagnose sync against a specific imported Guide file; diagnostics
+is Metronome-only by design (ADR 0006).
 
 ## Calibrate before you trust a clean result
 
@@ -38,20 +85,22 @@ measuring anything, or does it just always say zero?
 
 A report showing zero error is not evidence of a correct engine by itself —
 it's also what a broken instrument that never detects anything would show.
-Before you act on a clean (or any) result, run the Synthetic Sync Scenario
-once with a nonzero simulated latency (e.g. 80ms) and confirm the per-beat
-errors come back at approximately that value. Only once the harness has
-demonstrated it can report a known non-zero number should a later zero-error
-run be taken as a real measurement. The panel labels a nonzero-latency run
-as a calibration check, not a measurement, so a report can't be mistaken for
-the other.
+Run Full Diagnostics runs this check automatically and aborts on failure
+(see above). If you're running phases manually in the Advanced area, do this
+by hand: run the Synthetic Sync Scenario once with a nonzero simulated
+latency (e.g. 80ms) and confirm the per-beat errors come back at
+approximately that value before trusting any zero-error result from that
+session. The panel labels a nonzero-latency run as a calibration check, not
+a measurement, so a report can't be mistaken for the other.
 
 ## Where reports go
 
 Reports are written as JSON to the gitignored `diagnostics/` directory at
 the repository root, named `report-<ISO-timestamp>.json` with `:` and `.`
 replaced by `-` (e.g. `report-2026-07-26T12-34-56-789Z.json`). Sort by
-filename or mtime to find the newest.
+filename or mtime to find the newest. A Run Full Diagnostics run writes one
+file covering calibration, Mode B, and Mode A together; a manually-run
+Advanced phase writes its own file per action, same as before.
 
 ## Reading a report
 
@@ -132,11 +181,15 @@ them into a shifted error number.
 
 ### Don't draw conclusions from a Guide-less pass
 
-The panel warns when the Guide is silent — either absent, or excluded from
-the Monitor Mix — because a pass recorded that way exercises a different
-Offset path than normal use. Numbers from a Guide-less pass don't describe
-the case a normal recording session is in; don't compare them against a
-Guide-ful baseline.
+This applies to the main app's normal recording, where a pass can be run
+without a Guide or with it excluded from the Monitor Mix — that pass
+exercises a different Offset path than normal use, and its numbers don't
+describe the case a normal recording session is in. It does not describe
+diagnostics: since ADR 0006, a diagnostics run is never Guide-less — it
+always has its generated Metronome as Guide (see "The diagnostics Guide is
+always a Metronome" above). Don't compare diagnostics numbers against a
+Guide-ful baseline from an *imported* Guide, though — the Metronome and an
+imported Guide are both "Guide-ful," but not necessarily equivalent cases.
 
 ## Arming and what it changes about conducting a test
 
