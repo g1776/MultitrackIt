@@ -39,16 +39,27 @@ export function App() {
       <aside className="app__controls">
         <h1>MultitrackIt</h1>
 
-        {!project && <ProjectPicker />}
-
         {/* The Diagnostics panel replaces the recording UI rather than
             sitting alongside it, keeping a hard boundary between the app and
-            the instrument measuring it (ADR 0004). */}
-        {project && showDiagnostics && (
+            the instrument measuring it (ADR 0004). It's reachable from app
+            root regardless of Project state — the suite builds its own
+            ephemeral Project, so it doesn't need a real one open. */}
+        {showDiagnostics && (
           <DiagnosticsPanel onClose={() => setShowDiagnostics(false)} />
         )}
 
-        {project && !showDiagnostics && (
+        {!showDiagnostics && !project && (
+          <>
+            <ProjectPicker />
+            <div className="panel">
+              <button onClick={() => setShowDiagnostics(true)}>
+                Diagnostics
+              </button>
+            </div>
+          </>
+        )}
+
+        {!showDiagnostics && project && (
           <>
             <Toolbar
               projectName={project.name}
@@ -64,7 +75,9 @@ export function App() {
         {error && <p className="error">{error}</p>}
       </aside>
 
-      <div className="app__stage">{project && <VideoGrid tracks={tracks} />}</div>
+      <div className="app__stage">
+        {project && <VideoGrid tracks={tracks} />}
+      </div>
     </main>
   );
 }
