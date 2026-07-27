@@ -1,5 +1,6 @@
 import { RecordingEngine } from "../../src/engine/RecordingEngine";
 import { BrowserCaptureAdapter, BrowserPlaybackAdapter } from "../../src/adapters/browserAdapters";
+import { MicCaptureAdapter } from "../../src/adapters/micCaptureAdapter";
 import { BrowserCountInAdapter } from "../../src/adapters/countInAudio";
 import { generateMetronomeGuideAudio } from "../../src/adapters/metronomeAudio";
 import { ElectronProjectStorageAdapter } from "../../src/adapters/electronStorageAdapter";
@@ -14,6 +15,8 @@ import type { ProjectStorageAdapter } from "../../src/persistence/types";
 // exists before any component mounts.
 export const captureAdapter = new BrowserCaptureAdapter();
 export const playbackAdapter = new BrowserPlaybackAdapter();
+/** Audio-only real microphone capture, for Mode A's acoustic loopback (#28) — no camera to couple to, unlike `captureAdapter`. */
+export const micCaptureAdapter = new MicCaptureAdapter();
 export const countInAdapter = new BrowserCountInAdapter(() => playbackAdapter.getAudioContext());
 
 /**

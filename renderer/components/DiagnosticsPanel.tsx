@@ -5,6 +5,7 @@ import {
   diagnosticsStorage,
   engine,
   engineEventLog,
+  micCaptureAdapter,
   playbackAdapter,
 } from "../store/engine";
 import {
@@ -142,33 +143,43 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
   }
 
   /**
-   * Runs Mode A end to end (ADR 0004): plays the synthetic signal through
-   * the speakers and captures it back through the microphone, with no human
-   * performing, then writes its own report — distinct from the Synthetic
-   * Sync Scenario's report via `mode: "loopback"` (issue #21). Requires
-   * speakers, not headphones — a run over headphones or with muted speakers
-   * surfaces below as "no onsets detected", not a spurious number.
+   * Runs Mode A end to end (ADR 0004, ADR 0006): a fresh ephemeral Project
+   * with a generated Metronome Guide, recorded through the real
+   * `recordTake`/`stopRecording` path against a real, audio-only microphone
+   * capture adapter (#28) — the same path Mode B drives, substituting a real
+   * mic for its synthetic one. Writes its own report, distinct from the
+   * Synthetic Sync Scenario's report via `mode: "loopback"` (issue #21).
+   * Requires speakers, not headphones — a run over headphones or with muted
+   * speakers surfaces below as "no onsets detected", not a spurious number.
    */
   async function runLoopback(): Promise<void> {
     setLoopbackError(null);
     setLoopbackWrittenPath(null);
     setLoopbackAnalysis(null);
     setLoopbackRunning(true);
+    const loopbackEvents = new EngineEventLog(
+      () => playbackAdapter.getAudioContext().currentTime * 1000
+    );
     try {
-      const { params, analysis } = await runLoopbackScenario({
+      const result = await runLoopbackScenario({
+        capture: micCaptureAdapter,
+        playback: playbackAdapter,
+        countIn: countInAdapter,
+        metronomeAudio: generateMetronomeGuideAudio,
+        events: loopbackEvents,
         audioContext: playbackAdapter.getAudioContext(),
         params: loopbackParams,
       });
-      setLoopbackAnalysis(analysis);
-      const report = buildReport([], {
+      setLoopbackAnalysis(result.analysis);
+      const report = buildReport(loopbackEvents.getEvents(), {
         createdAt: new Date().toISOString(),
-        project: null,
+        project: summariseProject(result.project),
         audioClock: playbackAdapter.getAudioClockSession() ?? null,
         audioProcessing: null,
         scenario: null,
         analysis: null,
-        loopback: params,
-        loopbackAnalysis: analysis,
+        loopback: result.params,
+        loopbackAnalysis: result.analysis,
       });
       setLoopbackWrittenPath(await diagnosticsStorage.writeReport(report));
     } catch (e) {

@@ -1,38 +1,24 @@
 import { describe, it, expect, vi } from "vitest";
+import { FakeCaptureAdapter, FakeCountInAdapter, FakePlaybackAdapter, fakeMetronomeAudio } from "../engine/fakeAdapters";
 import { DEFAULT_LOOPBACK_PARAMS, runLoopbackScenario, type RunLoopbackScenarioOptions } from "./loopback";
 
-function fakeAudioContext() {
-  const destination = {};
-  const sources: { buffer: unknown; connect: ReturnType<typeof vi.fn>; start: ReturnType<typeof vi.fn> }[] = [];
-  return {
-    destination,
-    sampleRate: 48000,
-    createBuffer: vi.fn((_channels: number, length: number, sampleRate: number) => ({
-      copyToChannel: vi.fn(),
-      length,
-      sampleRate,
-    })),
-    createBufferSource: vi.fn(() => {
-      const source = { buffer: undefined, connect: vi.fn(), start: vi.fn() };
-      sources.push(source);
-      return source;
-    }),
-    _sources: sources,
-  } as unknown as AudioContext & { _sources: typeof sources };
-}
-
-function fakeStream() {
-  const stop = vi.fn();
-  return { getTracks: () => [{ stop }] } as unknown as MediaStream & { _stop: typeof stop };
-}
+/** Skips the real lead-in so tests run instantly, matching `scenario.test.ts`'s pattern. */
+const FAST: Partial<RunLoopbackScenarioOptions> = {
+  countInBars: 0,
+  countInPaddingMs: 0,
+  idleReleaseMs: 0,
+  sleep: async () => {},
+};
 
 function options(overrides: Partial<RunLoopbackScenarioOptions> = {}): RunLoopbackScenarioOptions {
   return {
-    audioContext: fakeAudioContext(),
-    openMicStream: vi.fn(async () => fakeStream()),
-    recordStream: vi.fn(async () => "mediaRef://captured"),
+    capture: new FakeCaptureAdapter(),
+    playback: new FakePlaybackAdapter(),
+    countIn: new FakeCountInAdapter(),
+    metronomeAudio: fakeMetronomeAudio,
+    audioContext: { sampleRate: 48000 } as AudioContext,
     decode: vi.fn(async () => ({ samples: new Float32Array(100), sampleRate: 48000 })),
-    sleep: vi.fn(async () => {}),
+    ...FAST,
     ...overrides,
   };
 }
@@ -50,47 +36,36 @@ describe("runLoopbackScenario", () => {
     expect(params).toEqual({ bpm: 120, beatsPerBar: 4, beatCount: 8 });
   });
 
-  it("plays the signal through the given AudioContext's destination", async () => {
-    const audioContext = fakeAudioContext();
-    await runLoopbackScenario(options({ audioContext }));
-
-    expect(audioContext.createBufferSource).toHaveBeenCalledTimes(1);
-    const source = audioContext._sources[0];
-    expect(source.connect).toHaveBeenCalledWith(audioContext.destination);
-    expect(source.start).toHaveBeenCalledTimes(1);
+  it("gives the ephemeral Project a real Metronome Guide, audible in Monitor Mix, matching its own tempo", async () => {
+    const { project } = await runLoopbackScenario(options({ params: { bpm: 120, beatsPerBar: 3 } }));
+    expect(project.tempoBpm).toBe(120);
+    expect(project.beatsPerBar).toBe(3);
+    expect(project.guide).not.toBeNull();
+    expect(project.guide!.includeInMonitorMix).toBe(true);
+    expect(project.guide!.metronomeSchedule).toBeDefined();
   });
 
-  it("records for the signal duration plus a tail, not just the signal duration", async () => {
-    const recordStream = vi.fn(async (_stream: MediaStream, _durationMs: number) => "mediaRef://captured");
-    await runLoopbackScenario(options({ recordStream, params: { bpm: 100, beatCount: 16 } }));
+  it("drives the real recordTake/stopRecording path with the given capture adapter, not ad hoc getUserMedia/MediaRecorder wiring", async () => {
+    const capture = new FakeCaptureAdapter();
+    const { project } = await runLoopbackScenario(options({ capture }));
 
-    const signalDurationMs = 16 * (60000 / 100);
-    const [, durationMs] = recordStream.mock.calls[0];
-    expect(durationMs).toBeGreaterThan(signalDurationMs);
+    expect(capture.armCount).toBe(1);
+    expect(capture.startedHandles).toHaveLength(1);
+    expect(capture.stoppedMediaRefs).toHaveLength(1);
+    expect(project.tracks).toHaveLength(1);
+    expect(project.tracks[0].takes).toHaveLength(1);
+    expect(project.tracks[0].takes[0].mediaRef).toBe(capture.stoppedMediaRefs[0]);
   });
 
-  it("releases the microphone stream once the run finishes", async () => {
-    const stream = fakeStream();
-    await runLoopbackScenario(options({ openMicStream: vi.fn(async () => stream) }));
+  it("decodes the recorded Take and analyses it against the real Guide's own beat schedule", async () => {
+    const decode = vi.fn(async () => ({ samples: new Float32Array(100), sampleRate: 48000 }));
+    const { project, analysis } = await runLoopbackScenario(options({ decode }));
 
-    expect(stream.getTracks()[0].stop).toHaveBeenCalledTimes(1);
-  });
-
-  it("releases the microphone stream even when the run fails", async () => {
-    const stream = fakeStream();
-    const decode = vi.fn(async () => {
-      throw new Error("decode failed");
-    });
-
-    await expect(
-      runLoopbackScenario(options({ openMicStream: vi.fn(async () => stream), decode }))
-    ).rejects.toThrow("decode failed");
-    expect(stream.getTracks()[0].stop).toHaveBeenCalledTimes(1);
-  });
-
-  it("decodes the recorded media and analyses it against the expected beat grid", async () => {
-    const { analysis } = await runLoopbackScenario(options());
+    expect(decode).toHaveBeenCalledWith(project.tracks[0].takes[0].mediaRef, expect.anything());
     expect(analysis.track.expectedBeatTimesMs).toHaveLength(DEFAULT_LOOPBACK_PARAMS.beatCount);
+    expect(analysis.track.expectedBeatTimesMs).toEqual(
+      project.guide!.metronomeSchedule!.slice(0, DEFAULT_LOOPBACK_PARAMS.beatCount).map((c) => c.atMs)
+    );
   });
 
   it("reports no onsets detected, rather than a spurious offset, for a silent capture", async () => {
@@ -99,6 +74,16 @@ describe("runLoopbackScenario", () => {
 
     expect(analysis.noOnsetsDetected).toBe(true);
     expect(analysis.roundTripLatencyMs).toBeNull();
+  });
+
+  it("waits for the signal duration plus a tail, not just the signal duration, before stopping capture", async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    await runLoopbackScenario(options({ sleep, params: { bpm: 100, beatCount: 16 } }));
+
+    const signalDurationMs = 16 * (60000 / 100);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    const [durationMs] = sleep.mock.calls[0];
+    expect(durationMs).toBeGreaterThan(signalDurationMs);
   });
 
   it.each([{ bpm: 0 }, { beatsPerBar: 0 }, { beatCount: 0 }])(
