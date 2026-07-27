@@ -835,6 +835,69 @@ describe("RecordingEngine", () => {
     });
   });
 
+  describe("attachGuide", () => {
+    it("attaches an existing Guide, including its click schedule, as this Project's own Guide", () => {
+      const source = new RecordingEngine(capture, playback, {
+        countIn,
+        ...NO_LEAD_IN,
+        metronomeAudio: fakeMetronomeAudio,
+      });
+      source.createProject("Source", { bpm: 120, beatsPerBar: 3 });
+      const sharedGuide = source.generateMetronomeGuide({ durationMs: 1000 });
+
+      engine.createProject("My Song");
+      const attached = engine.attachGuide(sharedGuide);
+
+      expect(attached).toEqual(sharedGuide);
+      expect(engine.getActiveProject()!.guide).toEqual(sharedGuide);
+    });
+
+    it("clones defensively, so toggling one engine's Guide flags never mutates another engine's Guide", () => {
+      const source = new RecordingEngine(capture, playback, {
+        countIn,
+        ...NO_LEAD_IN,
+        metronomeAudio: fakeMetronomeAudio,
+      });
+      source.createProject("Source", { bpm: 120, beatsPerBar: 3 });
+      const sharedGuide = source.generateMetronomeGuide({ durationMs: 1000 });
+
+      engine.createProject("My Song");
+      engine.attachGuide(sharedGuide);
+      engine.setGuideIncludeInMonitorMix(false);
+
+      expect(sharedGuide.includeInMonitorMix).toBe(true);
+      expect(source.getActiveProject()!.guide!.includeInMonitorMix).toBe(true);
+    });
+
+    it("replaces a previously imported or generated Guide", () => {
+      const source = new RecordingEngine(capture, playback, {
+        countIn,
+        ...NO_LEAD_IN,
+        metronomeAudio: fakeMetronomeAudio,
+      });
+      source.createProject("Source");
+      const sharedGuide = source.generateMetronomeGuide({ durationMs: 1000 });
+
+      engine.createProject("My Song");
+      engine.importGuide("imported-guide");
+      engine.attachGuide(sharedGuide);
+
+      expect(engine.getActiveProject()!.guide?.mediaRef).toBe(sharedGuide.mediaRef);
+    });
+
+    it("throws when attaching a Guide with no active Project", () => {
+      const source = new RecordingEngine(capture, playback, {
+        countIn,
+        ...NO_LEAD_IN,
+        metronomeAudio: fakeMetronomeAudio,
+      });
+      source.createProject("Source");
+      const sharedGuide = source.generateMetronomeGuide({ durationMs: 1000 });
+
+      expect(() => engine.attachGuide(sharedGuide)).toThrow();
+    });
+  });
+
   describe("Guide during recording and playback", () => {
     it("includes the Guide in the Monitor Mix at its Monitor Mix level while recording", async () => {
       engine.createProject("My Song");

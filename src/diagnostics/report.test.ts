@@ -31,6 +31,7 @@ function report(events: TimestampedEngineEvent[]) {
     project: PROJECT,
     audioClock: AUDIO_CLOCK,
     audioProcessing: null,
+    calibration: null,
     scenario: null,
     analysis: null,
     loopback: null,
@@ -162,6 +163,7 @@ describe("buildReport audioClock", () => {
       project: PROJECT,
       audioClock: null,
       audioProcessing: null,
+      calibration: null,
       scenario: null,
       analysis: null,
       loopback: null,
@@ -184,6 +186,7 @@ describe("buildReport audioProcessing", () => {
       project: PROJECT,
       audioClock: AUDIO_CLOCK,
       audioProcessing,
+      calibration: null,
       scenario: null,
       analysis: null,
       loopback: null,
@@ -214,6 +217,7 @@ describe("buildReport scenario", () => {
       project: PROJECT,
       audioClock: AUDIO_CLOCK,
       audioProcessing: null,
+      calibration: null,
       scenario,
       analysis: null,
       loopback: null,
@@ -252,6 +256,7 @@ describe("buildReport analysis", () => {
       project: PROJECT,
       audioClock: AUDIO_CLOCK,
       audioProcessing: null,
+      calibration: null,
       scenario: null,
       analysis,
       loopback: null,
@@ -277,6 +282,7 @@ describe("buildReport mode", () => {
       project: PROJECT,
       audioClock: AUDIO_CLOCK,
       audioProcessing: null,
+      calibration: null,
       scenario: {
         trackCount: 3,
         tempoBpm: 100,
@@ -299,6 +305,7 @@ describe("buildReport mode", () => {
       project: PROJECT,
       audioClock: AUDIO_CLOCK,
       audioProcessing: null,
+      calibration: null,
       scenario: null,
       analysis: null,
       loopback: { bpm: 100, beatsPerBar: 4, beatCount: 16 },
@@ -328,6 +335,29 @@ describe("buildReport mode", () => {
   it("has no loopback data for anything else", () => {
     expect(report([]).loopback).toBeNull();
     expect(report([]).loopbackAnalysis).toBeNull();
+  });
+
+  it("is full when both scenario and loopback params are present, rather than collapsing to loopback", () => {
+    const built = buildReport([], {
+      createdAt: CREATED_AT,
+      project: PROJECT,
+      audioClock: AUDIO_CLOCK,
+      audioProcessing: null,
+      calibration: { injectedLatencyMs: 80, measuredMs: 81, withinTolerance: true },
+      scenario: {
+        trackCount: 3,
+        tempoBpm: 100,
+        beatsPerBar: 4,
+        beatCount: 16,
+        armDelayMs: 0,
+        simulatedLatencyMs: 0,
+      },
+      analysis: null,
+      loopback: { bpm: 100, beatsPerBar: 4, beatCount: 16 },
+      loopbackAnalysis: null,
+    });
+
+    expect(built.mode).toBe("full");
   });
 });
 

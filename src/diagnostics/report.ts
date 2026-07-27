@@ -4,6 +4,7 @@ import type {
   AnalysisResult,
   AudioClockSession,
   AudioProcessingState,
+  CalibrationSummary,
   CountInMeasurement,
   DiagnosticsMode,
   DiagnosticsReport,
@@ -21,6 +22,8 @@ export interface ReportContext {
   audioClock: AudioClockSession | null;
   /** What the capture adapter read back off the granted track; null if nothing has been captured. */
   audioProcessing: AudioProcessingState | null;
+  /** The calibration pass's own result, for a `runFullDiagnosticsSuite` report; null for anything else. */
+  calibration: CalibrationSummary | null;
   /** The scenario parameters this pass was run with, for a synthetic scenario report; null for an ordinary manual pass. */
   scenario: ScenarioSummary | null;
   /** The per-Track onset/error analysis, once a synthetic scenario's Takes have been analysed; null otherwise. */
@@ -127,12 +130,17 @@ export function buildReport(
   };
 
   // Derived, never asked for directly: a report can't disagree with itself
-  // about what produced it (ADR 0004).
-  const mode: DiagnosticsMode = context.loopback
-    ? "loopback"
-    : context.scenario
-      ? "synthetic"
-      : "manual";
+  // about what produced it (ADR 0004). Both present at once only happens for
+  // a `runFullDiagnosticsSuite` report (ADR 0006) — checked first so that
+  // case isn't silently swallowed into plain "loopback".
+  const mode: DiagnosticsMode =
+    context.scenario && context.loopback
+      ? "full"
+      : context.loopback
+        ? "loopback"
+        : context.scenario
+          ? "synthetic"
+          : "manual";
 
   return {
     createdAt: context.createdAt,
@@ -140,6 +148,7 @@ export function buildReport(
     project: context.project,
     audioClock: context.audioClock,
     audioProcessing: context.audioProcessing,
+    calibration: context.calibration ?? null,
     scenario: context.scenario,
     analysis: context.analysis,
     loopback: context.loopback,

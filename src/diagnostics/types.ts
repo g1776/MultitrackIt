@@ -169,11 +169,13 @@ export interface AnalysisResult {
 
 /**
  * Which kind of pass produced a report: an ordinary manual pass, a Mode B
- * synthetic-capture scenario, or a Mode A acoustic-loopback run (ADR 0004).
- * Derived from which of `scenario`/`loopback` is present, so a report can
- * never disagree with itself about what produced it.
+ * synthetic-capture scenario alone, a Mode A acoustic-loopback run alone
+ * (ADR 0004), or a `runFullDiagnosticsSuite` run covering calibration, Mode
+ * B, and Mode A together (ADR 0006). Derived from which of
+ * `scenario`/`loopback` is present, so a report can never disagree with
+ * itself about what produced it.
  */
-export type DiagnosticsMode = "manual" | "synthetic" | "loopback";
+export type DiagnosticsMode = "manual" | "synthetic" | "loopback" | "full";
 
 /**
  * The parameters a Mode A acoustic-loopback run was made with (ADR 0004), so
@@ -199,6 +201,21 @@ export interface LoopbackAnalysisResult {
 }
 
 /**
+ * A calibration pass's own result: a synthetic scenario run deliberately
+ * made to report a known non-zero error (ADR 0006), and whether the harness
+ * measured approximately that value. Present so a `runFullDiagnosticsSuite`
+ * report can prove the instrument was validated before Mode B/Mode A ran,
+ * rather than asking a reader to trust an undocumented discipline.
+ */
+export interface CalibrationSummary {
+  /** The simulated capture-device latency (ms) the calibration pass injected. */
+  injectedLatencyMs: number;
+  /** Mean measured per-beat error (ms) across the calibration pass, or null if no beats were detected. */
+  measuredMs: number | null;
+  withinTolerance: boolean;
+}
+
+/**
  * A written record of one recording or playback pass: the Project it ran
  * against, the lead-in as both asked for and measured, and the full event
  * timeline including every schedule entry's computed start time and
@@ -213,6 +230,8 @@ export interface DiagnosticsReport {
   audioClock: AudioClockSession | null;
   /** The processing the captured audio actually passed through. Null before any capture. */
   audioProcessing: AudioProcessingState | null;
+  /** Present only for a `runFullDiagnosticsSuite` run; null for anything else. */
+  calibration: CalibrationSummary | null;
   /** Present only for a synthetic sync scenario run; null for an ordinary manual pass. */
   scenario: ScenarioSummary | null;
   /** Present only once a synthetic scenario's Takes have been analysed; null otherwise. */

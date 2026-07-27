@@ -28,6 +28,7 @@ describe("FakeDiagnosticsStorageAdapter", () => {
         beatsPerBar: 4,
         guide: { includeInMonitorMix: true, includeInMixdown: false },
       },
+      calibration: null,
       scenario: null,
       analysis: null,
       loopback: null,

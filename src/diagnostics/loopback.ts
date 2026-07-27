@@ -29,7 +29,7 @@ export const DEFAULT_LOOPBACK_PARAMS: LoopbackParams = {
  * can't end the instant the Guide itself stops — that would clip off a slow
  * device's own last onsets and read as "no onset" instead of "slow".
  */
-const CAPTURE_TAIL_MS = 1000;
+export const CAPTURE_TAIL_MS = 1000;
 
 function resolveParams(overrides: Partial<LoopbackParams> | undefined): LoopbackParams {
   const params = { ...DEFAULT_LOOPBACK_PARAMS, ...overrides };
